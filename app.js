@@ -4051,14 +4051,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    document.querySelectorAll('.modal').forEach(modal => {
-        modal.addEventListener('click', function(e) {
-            if (e.target === this) {
-                hideModal(this.id);
-            }
-        });
-    });
-    
+
     // Обработчики вкладок авторизации
     document.querySelectorAll('.auth-tab').forEach(tab => {
         tab.addEventListener('click', function() {
