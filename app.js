@@ -29,7 +29,7 @@ let selectedMaster = null;
 let selectedDate = null;
 let selectedTime = null;
 let selectedRating = 0;
-let selectedMasterRating = 0; // для отзыва о мастере
+let selectedMasterRating = 0;
 let currentAdminMode = 'admin';
 let currentMasterMode = 'master-bookings';
 let editingUserId = null;
@@ -38,13 +38,32 @@ let editingSalonId = null;
 let editingServiceId = null;
 let currentCalendarMonth = new Date();
 let actionsHistory = [];
-let currentActiveMasterId = null; // ID текущего выбранного мастера в мастер-панели
+let currentActiveMasterId = null;
+let searchTimeout = null;
+
+// ==============================================
+// НОВАЯ ФУНКЦИЯ: сопоставление специализации и категории услуги
+// ==============================================
+function getCategoryFromSpecialization(specialization) {
+    const map = {
+        'Парикмахер': 'hair',
+        'Барбер': 'barber',
+        'Мастер маникюра': 'nails',
+        'Подолог': 'nails',
+        'Косметолог': 'cosmetology',
+        'Визажист': 'cosmetology',
+        'Бровист': 'cosmetology',
+        'Лешмейкер': 'cosmetology',
+        'Эстетист': 'cosmetology',
+        'Массажист': 'massage'
+    };
+    return map[specialization] || null;
+}
 
 // ==============================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ==============================================
 function getSafeImageUrl(type = 'salon', text = '') {
-    // Локальная заглушка – файл orig.jpg должен лежать рядом с index.html
     return 'orig.jpg';
 }
 
@@ -153,7 +172,6 @@ function showPage(pageId) {
         pageElement.classList.add('active');
         window.scrollTo(0, 0);
         
-        // Обновляем хэш для поддержки истории браузера
         if (window.location.hash !== `#${pageId}`) {
             history.pushState({ page: pageId }, '', `#${pageId}`);
         }
@@ -174,13 +192,18 @@ function showPage(pageId) {
                 loadAllMasters();
                 break;
             case 'salon-page':
-                // Страница уже загружена при клике, ничего не делаем
                 break;
             case 'master-page':
                 if (selectedMaster) loadMasterPage(selectedMaster.id);
                 break;
             case 'service-page':
-                if (selectedService) loadServicePage(selectedService.id);
+                if (selectedService) {
+                    if (selectedService.salons) {
+                        // уже загружено через loadUniqueServicePage
+                    } else {
+                        loadServicePage(selectedService.id);
+                    }
+                }
                 break;
             case 'admin-page':
                 setupAdminPage();
@@ -195,9 +218,8 @@ function showPage(pageId) {
     }
 }
 
-// Обработка кнопок браузера "назад/вперёд"
 window.addEventListener('popstate', (event) => {
-    const hash = window.location.hash.substring(1); // убираем #
+    const hash = window.location.hash.substring(1);
     if (hash) {
         showPage(hash);
     } else {
@@ -205,7 +227,6 @@ window.addEventListener('popstate', (event) => {
     }
 });
 
-// При загрузке страницы проверяем хэш
 window.addEventListener('load', () => {
     const hash = window.location.hash.substring(1);
     if (hash && document.getElementById(hash)) {
@@ -249,12 +270,12 @@ function hideModal(modalId) {
 }
 
 // ==============================================
-// ЗАГРУЗКА ИЗОБРАЖЕНИЙ В STORAGE (с таймаутом)
+// ЗАГРУЗКА ИЗОБРАЖЕНИЙ В STORAGE
 // ==============================================
 async function uploadImage(file, folder) {
     if (!file) return null;
     
-    const maxSize = 5 * 1024 * 1024; // 5 MB
+    const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
         showNotification('Файл слишком большой. Максимальный размер 5 МБ.', 'error');
         return null;
@@ -299,7 +320,6 @@ async function logAction(actionType, objectType, objectId, details = {}, objectN
 
         let finalDetails = { ...details };
 
-        // Если originalData не передан, но нужно (для update/delete), пытаемся получить из БД
         if (!finalDetails.originalData && (actionType === 'update' || actionType === 'delete')) {
             try {
                 const collectionName = objectType + 's';
@@ -315,7 +335,6 @@ async function logAction(actionType, objectType, objectId, details = {}, objectN
             }
         }
 
-        // Если originalData всё ещё нет, но это delete, возможно, данные были переданы, но не сохранились? Проверим
         if (!finalDetails.originalData && actionType === 'delete') {
             console.warn(`logAction: для delete не удалось получить originalData (objectId: ${objectId})`);
         }
@@ -563,7 +582,6 @@ async function submitMasterReview() {
     }
 
     try {
-        // Проверим, не оставлял ли пользователь уже отзыв этому мастеру
         const existing = await db.collection('master_reviews')
             .where('masterId', '==', selectedMaster.id)
             .where('authorId', '==', currentUser.id)
@@ -587,7 +605,6 @@ async function submitMasterReview() {
         await db.collection('master_reviews').add(reviewData);
         await updateMasterRating(selectedMaster.id);
 
-        // Сброс формы
         document.getElementById('master-review-text').value = '';
         selectedMasterRating = 0;
         updateMasterRatingDisplay();
@@ -613,7 +630,7 @@ function updateMasterRatingDisplay() {
 }
 
 // ==============================================
-// ДАЛЕЕ ИДУТ ВСЕ ОСТАЛЬНЫЕ ФУНКЦИИ
+// ДАЛЕЕ ИДУТ ВСЕ ОСТАЛЬНЫЕ ФУНКЦИИ (без изменений, кроме блока с поиском)
 // ==============================================
 
 async function getActionsHistory(filters = {}) {
@@ -689,6 +706,9 @@ async function login() {
             
             hideModal('profile-modal');
             showNotification('Вы успешно вошли в систему');
+            
+            const searchInput = document.getElementById('global-search');
+            if (searchInput) searchInput.value = '';
             
             const activePage = document.querySelector('.page.active').id;
             showPage(activePage);
@@ -836,6 +856,9 @@ async function logout() {
         updateProfileButton();
         showNotification('Вы успешно вышли из системы');
         
+        const searchInput = document.getElementById('global-search');
+        if (searchInput) searchInput.value = '';
+        
         if (document.getElementById('admin-page').classList.contains('active') ||
             document.getElementById('profile-page').classList.contains('active') ||
             document.getElementById('master-schedule-page').classList.contains('active')) {
@@ -850,13 +873,12 @@ async function logout() {
 }
 
 // ==============================================
-// ЗАГРУЗКА САЛОНОВ С ФИЛЬТРАМИ И ПОИСКОМ
+// ЗАГРУЗКА САЛОНОВ С ФИЛЬТРАМИ И ПОИСКОМ (live‑поиск)
 // ==============================================
+
 async function loadSalonsWithFilters() {
     const container = document.getElementById('salons-container');
     const searchInput = document.getElementById('global-search');
-    
-    if (searchInput && searchInput.value.includes('@')) searchInput.value = '';
     
     const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
     
@@ -875,7 +897,7 @@ async function loadSalonsWithFilters() {
     const salons = await getSalons(filters);
     
     const recommendationsContainer = document.getElementById('recommendations-container');
-    const recommendationsSection = document.getElementById('recommendations-section');
+    const recommendationsSection = document.querySelector('.recommendations-section');
     
     if (searchTerm) {
         if (recommendationsContainer) recommendationsContainer.style.display = 'none';
@@ -1034,6 +1056,121 @@ function createServiceCard(service, salonName = '') {
     return serviceCard;
 }
 
+function createUniqueServiceCard(service) {
+    const serviceCard = document.createElement('div');
+    serviceCard.className = 'service-card';
+    serviceCard.setAttribute('data-service-name', service.name);
+    
+    const imageUrl = service.imageUrl || getSafeImageUrl('service', service.name);
+    const salonCount = service.salons.length;
+    
+    serviceCard.innerHTML = `
+        <img src="${imageUrl}" alt="${service.name}" class="service-img">
+        <div class="service-info">
+            <h3 class="service-name">${service.name}</h3>
+            <p class="service-category">${getCategoryName(service.category)}</p>
+            <p style="color: var(--text-light); font-size: 14px;">
+                <i class="fas fa-store"></i> Доступно в ${salonCount} салон${salonCount === 1 ? 'е' : salonCount < 5 ? 'ах' : 'ах'}
+            </p>
+            <p class="service-price">от ${service.price || 0} ₽</p>
+        </div>
+    `;
+    
+    serviceCard.addEventListener('click', function(e) {
+        if (!e.target.closest('button')) {
+            loadUniqueServicePage(service);
+            showPage('service-page');
+        }
+    });
+    
+    return serviceCard;
+}
+
+async function loadUniqueServicePage(service) {
+    selectedService = service;
+    
+    document.getElementById('service-page-name').textContent = service.name;
+    document.getElementById('service-page-category').textContent = getCategoryName(service.category);
+    document.getElementById('service-main-image').src = service.imageUrl || getSafeImageUrl('service', service.name);
+    document.getElementById('service-page-price').textContent = `от ${service.price || 0} ₽`;
+    document.getElementById('service-page-duration').textContent = `Длительность: ${service.duration || 60} минут`;
+    
+    document.getElementById('service-page-description').innerHTML = `
+        <p>Профессиональная услуга. Доступна в нескольких салонах. Выберите салон для записи.</p>
+    `;
+    
+    const serviceActions = document.getElementById('service-actions');
+    serviceActions.innerHTML = '';
+    if (currentUser && currentUser.role === 'client') {
+        serviceActions.innerHTML = `
+            <button class="btn btn-primary" onclick="showNotification('Выберите салон из списка ниже', 'info')">
+                <i class="fas fa-calendar-check"></i> Записаться
+            </button>
+        `;
+    }
+    
+    const salonsContainer = document.getElementById('service-salons-container');
+    if (!salonsContainer) return;
+    
+    salonsContainer.innerHTML = '';
+    if (service.salons.length === 0) {
+        salonsContainer.innerHTML = '<p class="no-results">Салоны не найдены</p>';
+        return;
+    }
+    
+    service.salons.forEach(salon => {
+        const card = createSalonCard(salon);
+        card.addEventListener('click', function(e) {
+            if (!e.target.closest('button')) {
+                startBookingForSalon(salon.id);
+            }
+        });
+        salonsContainer.appendChild(card);
+    });
+    
+    await loadServiceMastersForUniqueService(service);
+}
+
+async function loadServiceMastersForUniqueService(service) {
+    const container = document.getElementById('service-masters-container');
+    if (!container) return;
+    
+    const salonIds = service.salons.map(s => s.id);
+    if (salonIds.length === 0) {
+        container.innerHTML = '<p class="no-results">Мастера не найдены</p>';
+        return;
+    }
+    
+    const masters = [];
+    for (const salonId of salonIds) {
+        const salonMasters = await getMasters({ salonId });
+        masters.push(...salonMasters);
+    }
+    
+    const category = service.category;
+    const filteredMasters = masters.filter(master => {
+        const masterCategory = getCategoryFromSpecialization(master.specialization);
+        return masterCategory === category;
+    });
+    
+    if (filteredMasters.length === 0) {
+        container.innerHTML = '<p class="no-results">Мастера не найдены</p>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    filteredMasters.forEach(master => {
+        const masterCard = createMasterCard(master, master.salonName);
+        masterCard.addEventListener('click', function(e) {
+            if (!e.target.closest('button')) {
+                loadMasterPage(master.id);
+                showPage('master-page');
+            }
+        });
+        container.appendChild(masterCard);
+    });
+}
+
 async function loadAllSalons() {
     const container = document.getElementById('all-salons-container');
     if (!container) return;
@@ -1060,17 +1197,33 @@ async function loadAllServices() {
     const services = await getServices();
     const salons = await getSalons();
     const salonMap = {};
-    salons.forEach(salon => salonMap[salon.id] = salon.name);
+    salons.forEach(salon => salonMap[salon.id] = salon);
     
-    if (services.length === 0) {
+    const servicesMap = new Map();
+    services.forEach(service => {
+        const key = service.name.toLowerCase().trim();
+        if (!servicesMap.has(key)) {
+            servicesMap.set(key, {
+                ...service,
+                salons: []
+            });
+        }
+        if (service.salonId && salonMap[service.salonId]) {
+            servicesMap.get(key).salons.push(salonMap[service.salonId]);
+        }
+    });
+    
+    const uniqueServices = Array.from(servicesMap.values());
+    
+    if (uniqueServices.length === 0) {
         container.innerHTML = '<p class="no-results">Услуги не найдены</p>';
         return;
     }
     
     container.innerHTML = '';
-    services.forEach(service => {
-        const salonName = salonMap[service.salonId] || 'Неизвестный салон';
-        container.appendChild(createServiceCard(service, salonName));
+    uniqueServices.forEach(service => {
+        const card = createUniqueServiceCard(service);
+        container.appendChild(card);
     });
 }
 
@@ -1333,7 +1486,6 @@ async function loadMasterPage(masterId) {
         
         selectedMaster = { id: masterDoc.id, ...masterDoc.data() };
         
-        // Загружаем данные салона
         let salonName = 'Неизвестный салон';
         if (selectedMaster.salonId) {
             const salonDoc = await db.collection('salons').doc(selectedMaster.salonId).get();
@@ -1342,7 +1494,6 @@ async function loadMasterPage(masterId) {
             }
         }
         
-        // Заполняем страницу
         document.getElementById('master-page-name').textContent = selectedMaster.name;
         document.getElementById('master-page-specialization').textContent = selectedMaster.specialization || 'Специализация не указана';
         document.getElementById('master-main-image').src = selectedMaster.imageUrl || getSafeImageUrl('master', selectedMaster.name);
@@ -1352,7 +1503,6 @@ async function loadMasterPage(masterId) {
         
         document.getElementById('master-salon-text').textContent = salonName;
         
-        // Описание мастера
         const masterTags = document.getElementById('master-tags');
         if (masterTags) {
             masterTags.innerHTML = '';
@@ -1368,7 +1518,6 @@ async function loadMasterPage(masterId) {
         document.getElementById('master-page-description').textContent = 
             `Опытный мастер салона "${salonName}". Специализируется на ${selectedMaster.specialization || 'различных услугах'}.`;
         
-        // Кнопка записи
         const masterActions = document.getElementById('master-actions');
         masterActions.innerHTML = '';
         
@@ -1380,9 +1529,8 @@ async function loadMasterPage(masterId) {
             `;
         }
         
-        // Загружаем услуги и отзывы
         await loadMasterServices();
-        await loadMasterReviews(selectedMaster.id); // загрузка отзывов о мастере
+        await loadMasterReviews(selectedMaster.id);
         
         selectedMasterRating = 0;
         updateMasterRatingDisplay();
@@ -1398,14 +1546,20 @@ async function loadMasterServices() {
     
     const services = await getServices({ salonId: selectedMaster.salonId });
     
-    if (services.length === 0) {
+    const category = getCategoryFromSpecialization(selectedMaster.specialization);
+    let filteredServices = services;
+    if (category) {
+        filteredServices = services.filter(s => s.category === category);
+    }
+    
+    if (filteredServices.length === 0) {
         container.innerHTML = '<p class="no-results">Услуги не найдены</p>';
         return;
     }
     
     container.innerHTML = '';
     
-    services.forEach(service => {
+    filteredServices.forEach(service => {
         const serviceCard = document.createElement('div');
         serviceCard.className = 'service-card';
         serviceCard.setAttribute('data-service-id', service.id);
@@ -1431,7 +1585,7 @@ async function loadMasterServices() {
 }
 
 // ==============================================
-// СТРАНИЦА УСЛУГИ
+// СТРАНИЦА УСЛУГИ (оригинальная, для конкретного салона)
 // ==============================================
 async function loadServicePage(serviceId) {
     try {
@@ -1443,7 +1597,6 @@ async function loadServicePage(serviceId) {
         
         selectedService = { id: serviceDoc.id, ...serviceDoc.data() };
         
-        // Загружаем данные салона
         let salonName = 'Неизвестный салон';
         if (selectedService.salonId) {
             const salonDoc = await db.collection('salons').doc(selectedService.salonId).get();
@@ -1452,7 +1605,6 @@ async function loadServicePage(serviceId) {
             }
         }
         
-        // Заполняем страницу
         document.getElementById('service-page-name').textContent = selectedService.name;
         document.getElementById('service-page-category').textContent = getCategoryName(selectedService.category);
         document.getElementById('service-main-image').src = selectedService.imageUrl || getSafeImageUrl('service', selectedService.name);
@@ -1464,7 +1616,6 @@ async function loadServicePage(serviceId) {
             <p>Профессиональная услуга в салоне "${salonName}". Качественное выполнение с использованием современных технологий и материалов.</p>
         `;
         
-        // Кнопка записи
         const serviceActions = document.getElementById('service-actions');
         serviceActions.innerHTML = '';
         
@@ -1476,7 +1627,6 @@ async function loadServicePage(serviceId) {
             `;
         }
         
-        // Загружаем мастеров
         await loadServiceMasters();
     } catch (error) {
         console.error('Ошибка загрузки страницы услуги:', error);
@@ -1490,14 +1640,20 @@ async function loadServiceMasters() {
     
     const masters = await getMasters({ salonId: selectedService.salonId });
     
-    if (masters.length === 0) {
+    const category = selectedService.category;
+    const filteredMasters = masters.filter(master => {
+        const masterCategory = getCategoryFromSpecialization(master.specialization);
+        return masterCategory === category;
+    });
+    
+    if (filteredMasters.length === 0) {
         container.innerHTML = '<p class="no-results">Мастера не найдены</p>';
         return;
     }
     
     container.innerHTML = '';
     
-    masters.forEach(master => {
+    filteredMasters.forEach(master => {
         const masterCard = document.createElement('div');
         masterCard.className = 'master-card';
         masterCard.setAttribute('data-master-id', master.id);
@@ -1981,7 +2137,7 @@ async function submitReview() {
 }
 
 // ==============================================
-// ФУНКЦИЯ УДАЛЕНИЯ ОТЗЫВА (О САЛОНЕ) - ИСПРАВЛЕНО
+// ФУНКЦИЯ УДАЛЕНИЯ ОТЗЫВА (О САЛОНЕ)
 // ==============================================
 async function deleteReview(reviewId) {
     if (!confirm('Вы уверены, что хотите удалить этот отзыв?')) return;
@@ -1999,14 +2155,12 @@ async function deleteReview(reviewId) {
         
         await db.collection('reviews').doc(reviewId).delete();
         
-        // Передаём полный объект отзыва для возможности восстановления
         await logAction('delete', 'review', reviewId, { originalData: reviewData }, salonName);
         
         if (salonId) await updateSalonRating(salonId);
         
         showNotification('Отзыв успешно удален');
         
-        // Обновляем таблицу управления отзывами
         if (document.getElementById('reviews-management-table')) await loadReviewsManagement();
         if (currentSalon && currentSalon.id === salonId) await loadSalonReviews();
         
@@ -2111,8 +2265,8 @@ async function editMaster(masterId) {
             
             document.getElementById('master-name').value = master.name || '';
             
-            const specializationInput = document.getElementById('master-specialization');
-            if (specializationInput && specializationInput.tagName === 'INPUT') {
+            const specializationElement = document.getElementById('master-specialization');
+            if (specializationElement && specializationElement.tagName === 'INPUT') {
                 const select = document.createElement('select');
                 select.id = 'master-specialization';
                 select.className = 'form-input';
@@ -2130,7 +2284,7 @@ async function editMaster(masterId) {
                     <option value="Подолог">Подолог</option>
                 `;
                 
-                specializationInput.parentNode.replaceChild(select, specializationInput);
+                specializationElement.parentNode.replaceChild(select, specializationElement);
                 
                 const newSelect = document.getElementById('master-specialization');
                 if (newSelect && master.specialization) newSelect.value = master.specialization;
@@ -2144,7 +2298,6 @@ async function editMaster(masterId) {
             
             if (master.salonId) document.getElementById('master-salon').value = master.salonId;
             
-            // Скрываем поля создания пользователя при редактировании
             document.getElementById('master-email').style.display = 'none';
             document.getElementById('master-password').style.display = 'none';
             document.querySelector('label[for="master-email"]').style.display = 'none';
@@ -2214,7 +2367,6 @@ async function addSalon() {
         };
         
         if (editingSalonId) {
-            // Если редактируем и не загрузили новое изображение, удаляем поле из объекта
             if (imageUrl === null) delete salonData.imageUrl;
             
             const originalSalon = await db.collection('salons').doc(editingSalonId).get();
@@ -2409,11 +2561,9 @@ async function addMaster() {
             
             showNotification('Мастер успешно обновлен');
         } else {
-            // Создаем пользователя в аутентификации
             const userCredential = await auth.createUserWithEmailAndPassword(email, password);
             const user = userCredential.user;
             
-            // Создаем запись в коллекции users
             const userData = {
                 email: email,
                 name: name.split(' ')[0] || name,
@@ -2427,7 +2577,6 @@ async function addMaster() {
             
             await db.collection('users').doc(user.uid).set(userData);
             
-            // Добавляем userId в данные мастера
             masterData.userId = user.uid;
             masterData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
             
@@ -2468,16 +2617,13 @@ async function deleteSalon(salonId) {
         const salonDoc = await db.collection('salons').doc(salonId).get();
         const salonData = salonDoc.exists ? salonDoc.data() : null;
         
-        // Удаляем салон
         await db.collection('salons').doc(salonId).delete();
         
-        // Удаляем все услуги этого салона
         const servicesSnapshot = await db.collection('services').where('salonId', '==', salonId).get();
         const serviceBatch = db.batch();
         servicesSnapshot.docs.forEach(doc => serviceBatch.delete(doc.ref));
         await serviceBatch.commit();
         
-        // Удаляем всех мастеров этого салона
         const mastersSnapshot = await db.collection('masters').where('salonId', '==', salonId).get();
         const masterBatch = db.batch();
         mastersSnapshot.docs.forEach(doc => masterBatch.delete(doc.ref));
@@ -2527,7 +2673,6 @@ async function deleteMaster(masterId) {
         
         await db.collection('masters').doc(masterId).delete();
         
-        // Удаляем и пользователя, если он существует
         if (originalData && originalData.userId) {
             try {
                 await db.collection('users').doc(originalData.userId).delete();
@@ -2557,7 +2702,6 @@ async function deleteUser(userId) {
         
         await db.collection('users').doc(userId).delete();
         
-        // Удаляем всех мастеров, связанных с этим пользователем
         const masters = await getMasters({ userId: userId });
         for (const master of masters) {
             await db.collection('masters').doc(master.id).delete();
@@ -2619,7 +2763,6 @@ function setupAdminPage() {
         loadSelectOptions();
         loadAdminStats();
         
-        // Загружаем список салонов для фильтра отзывов (если вкладка уже активна, но скрыта)
         populateSalonFilterForReviews();
     } else if (isMaster) {
         const switcher = document.getElementById('admin-mode-switcher');
@@ -3007,7 +3150,7 @@ async function clearActionsHistory() {
         await batch.commit();
 
         showNotification('История действий полностью очищена', 'success');
-        loadActionsHistory(); // перезагрузить таблицу
+        loadActionsHistory();
     } catch (error) {
         console.error('Ошибка очистки истории:', error);
         showNotification('Ошибка при очистке истории', 'error');
@@ -3118,7 +3261,6 @@ async function saveUser() {
     }
 
     try {
-        // Получаем старые данные
         const oldUserDoc = await db.collection('users').doc(editingUserId).get();
         const oldData = oldUserDoc.exists ? oldUserDoc.data() : null;
 
@@ -3148,7 +3290,6 @@ async function saveUser() {
 // ==============================================
 async function updateBookingStatus(bookingId, newStatus) {
     try {
-        // Получаем старые данные до обновления
         const bookingDoc = await db.collection('bookings').doc(bookingId).get();
         const oldData = bookingDoc.exists ? bookingDoc.data() : null;
 
@@ -3358,7 +3499,6 @@ async function editMasterProfile() {
             
             const specializationSelect = document.getElementById('edit-master-specialization');
             if (specializationSelect) {
-                // Если это инпут, заменяем на селект
                 if (specializationSelect.tagName === 'INPUT') {
                     const select = document.createElement('select');
                     select.id = 'edit-master-specialization';
@@ -3409,14 +3549,11 @@ async function saveMasterProfile() {
     }
     
     try {
-        // Получаем старые данные пользователя
         const oldUserDoc = await db.collection('users').doc(currentUser.id).get();
         const oldUserData = oldUserDoc.exists ? oldUserDoc.data() : null;
 
-        // Обновляем данные пользователя
         await db.collection('users').doc(currentUser.id).update({ name, lastname, email, phone });
         
-        // Обновляем данные мастера
         const masters = await getMasters({ userId: currentUser.id });
         if (masters.length > 0) {
             const master = masters[0];
@@ -3426,7 +3563,6 @@ async function saveMasterProfile() {
             });
         }
         
-        // Обновляем пароль, если указан
         if (password) {
             try {
                 const user = auth.currentUser;
@@ -3440,7 +3576,6 @@ async function saveMasterProfile() {
             }
         }
         
-        // Обновляем текущего пользователя
         currentUser.name = name;
         currentUser.lastname = lastname;
         currentUser.email = email;
@@ -3528,16 +3663,14 @@ function renderCalendar(date) {
         <div class="calendar-day">Сб</div>
         <div class="calendar-day">Вс</div>`;
     
-    const firstDayIndex = (firstDay.getDay() + 6) % 7; // Начинаем с понедельника
+    const firstDayIndex = (firstDay.getDay() + 6) % 7;
     
-    // Пустые ячейки до первого дня месяца
     for (let i = 0; i < firstDayIndex; i++) {
         html += '<div class="calendar-date"></div>';
     }
     
     const today = new Date().toISOString().split('T')[0];
     
-    // Ячейки с днями месяца
     for (let day = 1; day <= daysInMonth; day++) {
         const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
         const dayOfWeek = new Date(year, month, day).getDay();
@@ -3555,23 +3688,18 @@ function renderCalendar(date) {
     
     container.innerHTML = html;
     
-    // Добавляем обработчики кликов
     container.querySelectorAll('.calendar-date[data-date]').forEach(dateEl => {
         dateEl.addEventListener('click', async function() {
             const selectedDate = this.getAttribute('data-date');
             
-            // Убираем выделение со всех дат
             container.querySelectorAll('.calendar-date').forEach(el => el.classList.remove('selected'));
             
-            // Выделяем выбранную дату
             this.classList.add('selected');
             
-            // Загружаем записи на эту дату
             loadDayBookings(selectedDate);
         });
     });
     
-    // Автоматически кликаем на сегодняшний день
     const todayEl = container.querySelector(`.calendar-date[data-date="${today}"]`);
     if (todayEl) {
         todayEl.click();
@@ -3604,7 +3732,6 @@ async function loadDayBookings(date) {
         return;
     }
     
-    // Сортируем записи по времени
     bookings.sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
     
     let html = '';
@@ -3700,7 +3827,6 @@ async function cancelUserBooking(bookingId) {
     if (!confirm('Вы уверены, что хотите отменить эту запись?')) return;
 
     try {
-        // Получаем старые данные до изменения
         const bookingDoc = await db.collection('bookings').doc(bookingId).get();
         const oldData = bookingDoc.exists ? bookingDoc.data() : null;
 
@@ -3725,20 +3851,9 @@ async function cancelUserBooking(bookingId) {
 }
 
 // ==============================================
-// ФУНКЦИЯ ПОИСКА
+// ФУНКЦИЯ ПОИСКА (вызывается по кнопке или по debounce)
 // ==============================================
 async function performSearch() {
-    const searchInput = document.getElementById('global-search');
-    if (!searchInput) return;
-    
-    const query = searchInput.value.trim();
-    
-    if (query.includes('@')) {
-        showNotification('Пожалуйста, используйте поиск по названию или адресу салона', 'warning');
-        searchInput.value = '';
-        return;
-    }
-    
     loadSalonsWithFilters();
 }
 
@@ -3807,7 +3922,6 @@ function resetMasterForm() {
     document.getElementById('master-email').value = '';
     document.getElementById('master-password').value = '';
     
-    // Показываем поля создания пользователя
     document.getElementById('master-email').style.display = 'block';
     document.getElementById('master-password').style.display = 'block';
     document.querySelector('label[for="master-email"]').style.display = 'block';
@@ -3874,11 +3988,9 @@ async function ensureAdminExists() {
         
         if (!adminExists) {
             try {
-                // Создаем пользователя в аутентификации
                 const userCredential = await auth.createUserWithEmailAndPassword(adminEmail, adminPassword);
                 const user = userCredential.user;
                 
-                // Создаем запись в коллекции users
                 const adminData = {
                     email: adminEmail,
                     name: 'Администратор',
@@ -3895,14 +4007,12 @@ async function ensureAdminExists() {
                 console.log('Администратор успешно создан');
                 showNotification('Администратор восстановлен: admin@beauty.ru / admin1', 'success');
             } catch (error) {
-                // Если пользователь уже существует в аутентификации
                 if (error.code === 'auth/email-already-in-use') {
                     const user = auth.currentUser;
                     if (user) {
                         const userDoc = await db.collection('users').doc(user.uid).get();
                         if (userDoc.exists) {
                             const userData = userDoc.data();
-                            // Если пользователь существует, но не является админом
                             if (userData.role !== 'admin') {
                                 await db.collection('users').doc(user.uid).update({
                                     role: 'admin',
@@ -3933,20 +4043,54 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Очищаем поле поиска
+    // ИСПРАВЛЕНО: поле поиска с readonly и защитой от автозаполнения
     const searchInput = document.getElementById('global-search');
     if (searchInput) {
+        // Принудительно очищаем
         searchInput.value = '';
         
-        searchInput.addEventListener('input', function(e) {
-            if (this.value.includes('@')) {
-                this.value = this.value.replace(/@.*$/, '');
-                showNotification('Пожалуйста, используйте поиск по названию салона', 'warning');
+        // Функция для активации поля (снимаем readonly и меняем name для сбивания автозаполнения)
+        const activateSearch = () => {
+            if (searchInput.hasAttribute('readonly')) {
+                searchInput.removeAttribute('readonly');
+                // Меняем name на уникальное, чтобы браузер не ассоциировал поле с сохранёнными данными
+                searchInput.setAttribute('name', 'search-query-' + Date.now());
             }
+        };
+        
+        // Активируем при фокусе или клике (один раз)
+        searchInput.addEventListener('focus', activateSearch, { once: true });
+        searchInput.addEventListener('click', activateSearch, { once: true });
+        
+        // Таймаут на случай, если фокус не произошёл (например, если браузер сам ставит фокус)
+        setTimeout(() => {
+            if (searchInput && !searchInput.hasAttribute('readonly')) {
+                // Если readonly уже снят, ничего не делаем
+            } else {
+                // Если поле всё ещё readonly, снимаем readonly и очищаем
+                searchInput.removeAttribute('readonly');
+                searchInput.value = '';
+            }
+        }, 500);
+        
+        // Обработчик input (live‑поиск) – добавляем всегда
+        searchInput.addEventListener('input', function(e) {
+            clearTimeout(searchTimeout);
+            const query = e.target.value.trim();
+            if (query.includes('@')) {
+                this.value = this.value.replace(/@.*$/, '');
+                showNotification('Пожалуйста, используйте поиск по названию или адресу', 'warning');
+                return;
+            }
+            searchTimeout = setTimeout(() => {
+                loadSalonsWithFilters();
+            }, 300);
         });
+        
+        // Удаляем старый обработчик keypress
+        searchInput.removeEventListener('keypress', performSearch);
     }
     
-    // Загружаем сохраненного пользователя из localStorage
     const savedUser = localStorage.getItem('beautyBookingUser');
     if (savedUser) {
         try {
@@ -3959,7 +4103,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Слушатель изменений состояния аутентификации
     auth.onAuthStateChanged(async (user) => {
         if (user) {
             try {
@@ -3980,20 +4123,16 @@ document.addEventListener('DOMContentLoaded', function() {
         setupUserNavigation();
     });
     
-    // Обработчики навигации
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', function(e) {
             e.preventDefault();
             
             const page = this.getAttribute('data-page');
             
-            // Убираем активный класс у всех ссылок
             document.querySelectorAll('.nav-link').forEach(navLink => navLink.classList.remove('active'));
             
-            // Добавляем активный класс текущей ссылке
             this.classList.add('active');
             
-            // Показываем соответствующую страницу
             switch(page) {
                 case 'home':
                     showPage('home-page');
@@ -4032,7 +4171,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Обработчики кнопок входа/выхода
     document.getElementById('profile-modal-btn')?.addEventListener('click', function() {
         if (!currentUser) {
             showModal('profile-modal');
@@ -4041,7 +4179,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     document.getElementById('logout-btn')?.addEventListener('click', logout);
     
-    // Обработчики модальных окон
     document.querySelectorAll('.modal-close').forEach(closeBtn => {
         closeBtn.addEventListener('click', function() {
             const modal = this.closest('.modal');
@@ -4052,26 +4189,20 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
 
-    // Обработчики вкладок авторизации
     document.querySelectorAll('.auth-tab').forEach(tab => {
         tab.addEventListener('click', function() {
             const tabType = this.getAttribute('data-auth-tab');
             
-            // Убираем активный класс у всех вкладок
             document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
             
-            // Добавляем активный класс текущей вкладке
             this.classList.add('active');
             
-            // Скрываем все формы
             document.querySelectorAll('.auth-form').forEach(form => form.classList.remove('active'));
             
-            // Показываем выбранную форму
             document.getElementById(`${tabType}-form`).classList.add('active');
         });
     });
     
-    // Переключение между формами входа и регистрации
     document.getElementById('switch-to-register')?.addEventListener('click', function(e) {
         e.preventDefault();
         document.querySelector('.auth-tab[data-auth-tab="register"]').click();
@@ -4082,23 +4213,13 @@ document.addEventListener('DOMContentLoaded', function() {
         document.querySelector('.auth-tab[data-auth-tab="login"]').click();
     });
     
-    // Обработчики кнопок входа и регистрации
     document.getElementById('login-btn')?.addEventListener('click', login);
     document.getElementById('register-btn')?.addEventListener('click', register);
     
-    // Обработчики поиска
     document.getElementById('search-btn')?.addEventListener('click', performSearch);
     
-    document.getElementById('global-search')?.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            performSearch();
-        }
-    });
-    
-    // Обработчик фильтров
     document.getElementById('apply-filters')?.addEventListener('click', applyFilters);
     
-    // Обработчики звезд рейтинга для салонов
     document.querySelectorAll('#review-stars i').forEach(star => {
         star.addEventListener('click', function() {
             selectedRating = parseInt(this.getAttribute('data-rating'));
@@ -4117,7 +4238,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Обработчики звезд для мастера
     document.querySelectorAll('#master-review-stars i').forEach(star => {
         star.addEventListener('click', function() {
             selectedMasterRating = parseInt(this.getAttribute('data-rating'));
@@ -4134,13 +4254,10 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Кнопка отправки отзыва о мастере
     document.getElementById('submit-master-review')?.addEventListener('click', submitMasterReview);
     
-    // Обработчик отправки отзыва о салоне
     document.getElementById('submit-review')?.addEventListener('click', submitReview);
     
-    // Обработчики кнопок записи на страницах
     document.addEventListener('click', function(e) {
         if (e.target.id === 'book-this-salon' || e.target.closest('#book-this-salon')) {
             startBookingProcess();
@@ -4155,7 +4272,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Обработчики шагов бронирования
     document.getElementById('to-step-2')?.addEventListener('click', function() {
         if (!selectedService) {
             showNotification('Пожалуйста, выберите услугу', 'error');
@@ -4211,7 +4327,6 @@ document.addEventListener('DOMContentLoaded', function() {
         goToStep(4);
         updateBookingSummary();
         
-        // Заполняем форму данными пользователя, если он авторизован
         if (currentUser) {
             const nameInput = document.getElementById('client-name');
             const lastnameInput = document.getElementById('client-lastname');
@@ -4229,20 +4344,17 @@ document.addEventListener('DOMContentLoaded', function() {
     
     document.getElementById('confirm-booking')?.addEventListener('click', confirmBooking);
     
-    // Обработчик для переключения вкладок админ-панели
     document.addEventListener('click', function(e) {
         if (e.target.closest('.mode-btn')) {
             const btn = e.target.closest('.mode-btn');
             const mode = btn.getAttribute('data-mode');
             
-            // Определяем, в какой панели находимся
             const masterModeVisible = document.getElementById('master-mode')?.style.display === 'block';
             const adminModeVisible = document.getElementById('admin-mode')?.style.display === 'block';
             
             e.preventDefault();
             e.stopPropagation();
             
-            // Переключение в мастер-панели
             if (masterModeVisible && (mode === 'master-bookings' || mode === 'master-actions-history')) {
                 document.querySelectorAll('#master-mode .mode-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
@@ -4261,7 +4373,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
             
-            // Переключение в админ-панели
             else if (mode && (mode === 'admin' || mode === 'actions-history' || mode === 'reviews-management' || mode === 'users-management')) {
                 document.querySelectorAll('#admin-mode-switcher .mode-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
@@ -4279,18 +4390,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     loadActionsHistory();
                 } else if (mode === 'reviews-management') {
                     document.getElementById('reviews-management-mode').style.display = 'block';
-                    // Загружаем фильтр и таблицу при переключении
                     populateSalonFilterForReviews();
                     loadReviewsManagement();
                 } else if (mode === 'users-management') {
                     document.getElementById('users-management-mode').style.display = 'block';
-                    updateAdminTables(); // Обновляем таблицы при переключении
+                    updateAdminTables();
                 }
             }
         }
     });
 
-    // Обработчики кнопок добавления
     document.getElementById('add-salon-btn')?.addEventListener('click', function() {
         resetSalonForm();
         showModal('add-salon-modal');
@@ -4298,7 +4407,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('add-service-admin-btn')?.addEventListener('click', function() {
         resetServiceForm();
-        loadSelectOptions(); // чтобы обновить список салонов
+        loadSelectOptions();
         showModal('add-service-modal');
     });
 
@@ -4308,18 +4417,14 @@ document.addEventListener('DOMContentLoaded', function() {
         showModal('add-master-modal');
     });
 
-    // Обработчик кнопки применения фильтра отзывов
     document.getElementById('apply-review-filter')?.addEventListener('click', function() {
         loadReviewsManagement();
     });
     
-    // Обработчики кнопок обновления
     document.getElementById('refresh-history')?.addEventListener('click', loadActionsHistory);
     
-    // Обработчик кнопки очистки истории
     document.getElementById('clear-history')?.addEventListener('click', clearActionsHistory);
     
-    // Обработчики модальных окон салона
     document.getElementById('save-salon')?.addEventListener('click', addSalon);
     document.getElementById('cancel-salon')?.addEventListener('click', function() {
         hideModal('add-salon-modal');
@@ -4330,7 +4435,6 @@ document.addEventListener('DOMContentLoaded', function() {
         resetSalonForm();
     });
     
-    // Обработчики модальных окон услуги
     document.getElementById('save-service')?.addEventListener('click', addService);
     document.getElementById('cancel-service')?.addEventListener('click', function() {
         hideModal('add-service-modal');
@@ -4341,7 +4445,6 @@ document.addEventListener('DOMContentLoaded', function() {
         resetServiceForm();
     });
     
-    // Обработчики модальных окон мастера
     document.getElementById('save-master')?.addEventListener('click', addMaster);
     document.getElementById('cancel-master')?.addEventListener('click', function() {
         hideModal('add-master-modal');
@@ -4352,7 +4455,6 @@ document.addEventListener('DOMContentLoaded', function() {
         resetMasterForm();
     });
     
-    // Обработчики модальных окон пользователя
     document.getElementById('save-edit-user')?.addEventListener('click', saveUser);
     document.getElementById('cancel-edit-user')?.addEventListener('click', function() {
         hideModal('edit-user-modal');
@@ -4363,7 +4465,6 @@ document.addEventListener('DOMContentLoaded', function() {
         resetUserForm();
     });
     
-    // Обработчики профиля мастера
     document.getElementById('edit-master-profile')?.addEventListener('click', editMasterProfile);
     document.getElementById('delete-master-profile')?.addEventListener('click', deleteMasterProfile);
     document.getElementById('save-edit-master')?.addEventListener('click', saveMasterProfile);
@@ -4374,11 +4475,9 @@ document.addEventListener('DOMContentLoaded', function() {
         hideModal('edit-master-modal');
     });
     
-    // Обработчики календаря
     document.getElementById('prev-month')?.addEventListener('click', prevMonth);
     document.getElementById('next-month')?.addEventListener('click', nextMonth);
     
-    // Форматирование телефона в реальном времени
     document.getElementById('client-phone')?.addEventListener('input', function(e) {
         let value = this.value.replace(/\D/g, '');
         if (value.length > 0) {
@@ -4405,8 +4504,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Предпросмотр изображений при загрузке файла или вставке ссылки
-    // Салон
     const salonFileInput = document.getElementById('salon-image-upload');
     const salonUrlInput = document.getElementById('salon-image-url');
     const salonPreview = document.getElementById('salon-image-preview');
@@ -4437,7 +4534,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Услуга
     const serviceFileInput = document.getElementById('service-image-upload');
     const serviceUrlInput = document.getElementById('service-image-url');
     const servicePreview = document.getElementById('service-image-preview');
@@ -4468,7 +4564,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Мастер
     const masterFileInput = document.getElementById('master-image-upload');
     const masterUrlInput = document.getElementById('master-image-url');
     const masterPreview = document.getElementById('master-image-preview');
@@ -4499,7 +4594,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Обработчики для переключения между мастерами
     document.getElementById('switch-master-btn')?.addEventListener('click', function() {
         const select = document.getElementById('master-select');
         const selectedMasterId = select.value;
@@ -4509,7 +4603,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        window.selectedMasterForSwitch = selectedMasterId; // временное хранение
+        window.selectedMasterForSwitch = selectedMasterId;
         showModal('switch-master-password-modal');
     });
     
@@ -4533,15 +4627,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         const select = document.getElementById('master-select');
-        const selectedIndex = select.selectedIndex; // 0 - первый пункт (пустой)
-        const masterIndex = selectedIndex - 1; // индекс в списке мастеров
+        const selectedIndex = select.selectedIndex;
+        const masterIndex = selectedIndex - 1;
         
         if (masterIndex < 0) {
             showNotification('Ошибка выбора мастера', 'error');
             return;
         }
         
-        // Пароль должен быть номером мастера (индекс + 1)
         const expectedPassword = (masterIndex + 1).toString();
         
         if (enteredPassword !== expectedPassword) {
@@ -4549,7 +4642,6 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        // Пароль верный – переключаемся
         const masterId = select.value;
         
         try {
@@ -4558,11 +4650,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const master = masterDoc.data();
                 currentActiveMasterId = masterId;
                 
-                // Обновляем детали мастера
                 document.getElementById('master-detail-name').textContent = master.name || '';
                 document.getElementById('master-detail-specialization').textContent = master.specialization || 'Не указана';
                 document.getElementById('master-detail-salon').textContent = master.salonName || 'Неизвестно';
-                // email, phone не меняются (они от текущего пользователя)
                 
                 await loadMasterBookingsForMaster(masterId);
                 showNotification(`Переключено на мастера ${master.name}`, 'success');
@@ -4576,10 +4666,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Инициализация при загрузке
     initializeSalonRatings();
     
-    // Загрузка статистики для админов
     if (currentUser && currentUser.role === 'admin') {
         loadAdminStats();
     }
@@ -4591,24 +4679,21 @@ document.addEventListener('DOMContentLoaded', function() {
 // ДОПОЛНИТЕЛЬНЫЕ ОБРАБОТЧИКИ
 // ==============================================
 
-// Дополнительный обработчик для админ-панели
 document.querySelectorAll('.admin-mode-switcher .mode-btn').forEach(btn => {
     btn.addEventListener('click', function(e) {
         e.stopPropagation();
     });
 });
 
-// Обработчик клика на логотип - переход на главную
 document.querySelector('.logo')?.addEventListener('click', function(e) {
     e.preventDefault();
     showPage('home-page');
-    // Убираем активный класс у всех нав-ссылок и добавляем главной
     document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
     document.querySelector('.nav-link[data-page="home"]').classList.add('active');
 });
 
 // ==============================================
-// ВОССТАНОВЛЕНИЕ АДМИНА (дубль для надёжности)
+// ВОССТАНОВЛЕНИЕ АДМИНА
 // ==============================================
 ensureAdminExists();
 
@@ -4616,12 +4701,10 @@ ensureAdminExists();
 // ФИНАЛЬНАЯ ИНИЦИАЛИЗАЦИЯ
 // ==============================================
 
-// Убедимся, что все обработчики загружены
 window.addEventListener('load', function() {
     console.log('Страница полностью загружена');
 });
 
-// Обработчик ошибок
 window.addEventListener('error', function(e) {
     console.error('Произошла ошибка:', e.error);
 });

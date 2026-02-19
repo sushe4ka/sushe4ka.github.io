@@ -56,7 +56,8 @@
                     <div class="search-container">
                         <div class="search-input-wrapper">
                             <i class="fas fa-search"></i>
-                            <input type="text" id="global-search" placeholder="Искать салоны, услуги, мастеров...">
+                            <!-- ИСПРАВЛЕНО: type="search", добавлены атрибуты -->
+                            <input type="search" id="global-search" name="q" placeholder="Искать салоны, услуги, мастеров..." autocomplete="off" spellcheck="false" readonly>
                             <button class="btn-search" id="search-btn">
                                 <i class="fas fa-search"></i> Найти
                             </button>
@@ -129,11 +130,11 @@
         </div>
     </section>
 
-    <!-- Страница всех услуг -->
+    <!-- Страница всех услуг (уникальные) -->
     <section id="services-page" class="page">
         <div class="container">
             <h1 class="page-title">Все услуги</h1>
-            <p class="page-subtitle">Выберите услугу для записи</p>
+            <p class="page-subtitle">Выберите услугу для просмотра салонов и записи</p>
             <div id="all-services-container" class="services-grid"></div>
         </div>
     </section>
@@ -270,7 +271,7 @@
         </div>
     </section>
 
-    <!-- Страница услуги -->
+    <!-- Страница услуги (уникальной) -->
     <section id="service-page" class="page">
         <div class="container">
             <div class="service-header">
@@ -280,10 +281,6 @@
                 <div class="service-details">
                     <h1 id="service-page-name" class="page-title"></h1>
                     <p id="service-page-category" class="page-subtitle"></p>
-                    <p id="service-page-salon" class="page-subtitle">
-                        <i class="fas fa-store"></i>
-                        <span id="service-salon-text"></span>
-                    </p>
                     <p id="service-page-price" class="service-price-large"></p>
                     <p id="service-page-duration" class="page-subtitle"></p>
                     <div id="service-page-description"></div>
@@ -291,6 +288,11 @@
                         <!-- Кнопка записи будет добавлена динамически -->
                     </div>
                 </div>
+            </div>
+            <!-- БЛОК: салоны, где есть эта услуга -->
+            <div class="salons-section">
+                <h2 class="section-title">Салоны, предоставляющие эту услугу</h2>
+                <div id="service-salons-container" class="salons-grid"></div>
             </div>
             <div class="masters-section">
                 <h2 class="section-title">Мастера, выполняющие эту услугу</h2>
@@ -383,7 +385,7 @@
         </div>
     </section>
 
-    <!-- Админ-панель -->
+    <!-- Админ-панель (поиск удалён) -->
     <section id="admin-page" class="page">
         <div class="container">
             <h1 class="page-title" id="admin-page-title">Админ-панель</h1>
@@ -402,9 +404,7 @@
                     <button class="btn" id="add-service-admin-btn">Добавить услугу</button>
                     <button class="btn" id="add-master-btn">Добавить мастера</button>
                 </div>
-                <div class="search-container" style="margin-bottom: 20px;">
-                    <input type="text" id="admin-table-search" placeholder="Поиск по таблицам..." class="form-input">
-                </div>
+                <!-- УДАЛЁН блок с поиском по таблицам -->
                 <div class="admin-section">
                     <h2>Управление салонами</h2>
                     <div class="data-table-container">
@@ -888,7 +888,19 @@
             </div>
             <div class="form-group">
                 <label class="form-label" for="master-specialization">Специализация</label>
-                <input class="form-input" type="text" id="master-specialization" placeholder="Введите специализацию">
+                <select class="form-input" id="master-specialization">
+                    <option value="">Выберите специализацию</option>
+                    <option value="Парикмахер">Парикмахер</option>
+                    <option value="Мастер маникюра">Мастер маникюра</option>
+                    <option value="Косметолог">Косметолог</option>
+                    <option value="Массажист">Массажист</option>
+                    <option value="Барбер">Барбер</option>
+                    <option value="Визажист">Визажист</option>
+                    <option value="Бровист">Бровист</option>
+                    <option value="Лешмейкер">Лешмейкер</option>
+                    <option value="Эстетист">Эстетист</option>
+                    <option value="Подолог">Подолог</option>
+                </select>
             </div>
             <div class="form-group">
                 <label class="form-label" for="master-price">Средняя цена (руб.)</label>
