@@ -11,7 +11,7 @@
     --border-color: #e0e6eb;
     --text-dark: #2c3e50;
     --text-light: #6c757d;
-    --text-lighter: #95a5a6;
+    --text-lighter: #95a6a6;
     /* Дополнительные */
     --success-color: #2ecc71;
     --error-color: #e74c3c;
@@ -31,23 +31,27 @@
     --transition-normal: 0.3s ease;
     --transition-slow: 0.5s ease;
 }
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
     font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
+
 body {
     background-color: var(--white);
     color: var(--text-dark);
     line-height: 1.6;
     font-size: 16px;
 }
+
 .container {
     max-width: 1200px;
     margin: 0 auto;
     padding: 0 20px;
 }
+
 /* ===== ШАПКА ===== */
 header {
     background-color: var(--white);
@@ -57,12 +61,14 @@ header {
     z-index: 1000;
     border-bottom: 2px solid var(--primary-extra-light);
 }
+
 .header-container {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 18px 0;
 }
+
 .logo {
     display: flex;
     align-items: center;
@@ -78,21 +84,26 @@ header {
     -ms-user-select: none;
     cursor: default !important;
 }
+
 .logo i,
 .logo span {
     pointer-events: none;
 }
+
 .logo:hover {
     color: var(--primary-dark);
 }
+
 .logo i {
     font-size: 28px;
 }
+
 nav ul {
     display: flex;
     list-style: none;
     gap: 28px;
 }
+
 nav a {
     text-decoration: none;
     color: var(--text-dark);
@@ -103,13 +114,16 @@ nav a {
     transition: var(--transition-fast);
     position: relative;
 }
+
 nav a:hover {
     color: var(--primary-color);
 }
+
 nav a.active {
     color: var(--primary-color);
     background-color: rgba(0, 167, 121, 0.08);
 }
+
 nav a.active::after {
     content: '';
     position: absolute;
@@ -121,11 +135,13 @@ nav a.active::after {
     background-color: var(--primary-color);
     border-radius: 50%;
 }
+
 .auth-buttons {
     display: flex;
     align-items: center;
     gap: 15px;
 }
+
 .profile-btn {
     background: linear-gradient(135deg, var(--primary-color), var(--primary-bg));
     color: var(--white);
@@ -140,11 +156,13 @@ nav a.active::after {
     gap: 10px;
     box-shadow: var(--shadow-sm);
 }
+
 .profile-btn:hover {
     background: linear-gradient(135deg, var(--primary-dark), var(--primary-color));
     transform: translateY(-2px);
     box-shadow: var(--shadow-md);
 }
+
 .logout-btn {
     background: transparent;
     color: var(--error-color);
@@ -158,10 +176,12 @@ nav a.active::after {
     align-items: center;
     gap: 8px;
 }
+
 .logout-btn:hover {
     background-color: var(--error-color);
     color: var(--white);
 }
+
 /* ===== ГЕРОЙ-БАННЕР ===== */
 .hero-banner {
     background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)),
@@ -172,23 +192,27 @@ nav a.active::after {
     margin-bottom: 60px;
     border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
+
 .hero-content {
     text-align: center;
     color: var(--white);
     max-width: 800px;
     margin: 0 auto;
 }
+
 .hero-title {
     font-size: 48px;
     font-weight: 700;
     margin-bottom: 20px;
     line-height: 1.2;
 }
+
 .hero-subtitle {
     font-size: 20px;
     margin-bottom: 40px;
     opacity: 0.9;
 }
+
 .search-container {
     background: var(--white);
     border-radius: var(--radius-lg);
@@ -197,17 +221,20 @@ nav a.active::after {
     max-width: 700px;
     box-shadow: var(--shadow-lg);
 }
+
 .search-input-wrapper {
     display: flex;
     align-items: center;
     padding: 0 20px;
     position: relative;
 }
+
 .search-input-wrapper i {
     color: var(--text-lighter);
     font-size: 18px;
     margin-right: 15px;
 }
+
 #global-search {
     flex: 1;
     border: none;
@@ -218,9 +245,11 @@ nav a.active::after {
     background: transparent;
     width: 100%;
 }
+
 #global-search::placeholder {
     color: var(--text-lighter);
 }
+
 .search-input-wrapper .clear-search {
     position: absolute;
     right: 130px;
@@ -233,12 +262,15 @@ nav a.active::after {
     font-size: 16px;
     display: none;
 }
+
 .search-input-wrapper .clear-search:hover {
     color: var(--error-color);
 }
+
 .search-input-wrapper input:not(:placeholder-shown) + .clear-search {
     display: block;
 }
+
 .btn-search {
     background: linear-gradient(135deg, var(--primary-color), var(--primary-bg));
     color: var(--white);
@@ -254,24 +286,29 @@ nav a.active::after {
     gap: 8px;
     white-space: nowrap;
 }
+
 .btn-search:hover {
     background: linear-gradient(135deg, var(--primary-dark), var(--primary-color));
     transform: translateY(-2px);
 }
+
 /* ===== РАСШИРЕННЫЕ ФИЛЬТРЫ ===== */
 .advanced-filters {
     display: none !important;
 }
+
 /* ===== ПАНЕЛЬ ФИЛЬТРОВ ===== */
 .section-header {
     margin-bottom: 40px;
 }
+
 .section-title {
     font-size: 32px;
     font-weight: 700;
     color: var(--text-dark);
     margin-bottom: 25px;
 }
+
 .filters-panel {
     display: flex;
     gap: 20px;
@@ -282,17 +319,20 @@ nav a.active::after {
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color);
 }
+
 .filter-group {
     display: flex;
     flex-direction: column;
     gap: 8px;
     min-width: 180px;
 }
+
 .filter-group label {
     font-weight: 500;
     color: var(--text-dark);
     font-size: 14px;
 }
+
 .filter-select {
     padding: 12px 16px;
     border: 1px solid var(--border-color);
@@ -304,11 +344,13 @@ nav a.active::after {
     transition: var(--transition-fast);
     width: 100%;
 }
+
 .filter-select:focus {
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(0, 167, 121, 0.1);
 }
+
 /* ===== КАРТОЧКИ САЛОНОВ ===== */
 .salons-grid {
     display: grid;
@@ -316,6 +358,7 @@ nav a.active::after {
     gap: 30px;
     margin-bottom: 50px;
 }
+
 .salon-card {
     background: var(--white);
     border-radius: var(--radius-lg);
@@ -328,29 +371,34 @@ nav a.active::after {
     display: flex;
     flex-direction: column;
 }
+
 .salon-card:hover {
     transform: translateY(-8px);
     box-shadow: var(--shadow-lg);
     border-color: var(--primary-light);
 }
+
 .salon-img {
     width: 100%;
     height: 200px;
     object-fit: cover;
     object-position: center;
 }
+
 .salon-info {
     padding: 24px;
     flex: 1;
     display: flex;
     flex-direction: column;
 }
+
 .salon-name {
     font-size: 20px;
     font-weight: 700;
     margin-bottom: 8px;
     color: var(--text-dark);
 }
+
 .salon-address {
     color: var(--text-light);
     font-size: 14px;
@@ -359,33 +407,40 @@ nav a.active::after {
     align-items: center;
     gap: 8px;
 }
+
 .salon-address i {
     color: var(--primary-color);
 }
+
 .salon-rating {
     display: flex;
     align-items: center;
     gap: 6px;
     margin-bottom: 15px;
 }
+
 .salon-rating i {
     color: #ffc107;
     font-size: 14px;
 }
+
 .rating-value {
     font-weight: 600;
     color: var(--text-dark);
 }
+
 .rating-count {
     color: var(--text-lighter);
     font-size: 14px;
 }
+
 .salon-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 15px;
 }
+
 .salon-tag {
     background: rgba(0, 167, 121, 0.1);
     color: var(--primary-color);
@@ -394,17 +449,20 @@ nav a.active::after {
     font-size: 12px;
     font-weight: 500;
 }
+
 .salon-price {
     margin-top: auto;
     color: var(--primary-color);
     font-weight: 700;
     font-size: 18px;
 }
+
 .salon-actions {
     display: flex;
     gap: 12px;
     margin-top: 15px;
 }
+
 /* ===== КАРТОЧКИ УСЛУГ ===== */
 .services-grid, .masters-grid {
     display: grid;
@@ -412,6 +470,7 @@ nav a.active::after {
     gap: 25px;
     margin-bottom: 40px;
 }
+
 .service-card, .master-card {
     background: var(--white);
     border-radius: var(--radius-md);
@@ -419,43 +478,51 @@ nav a.active::after {
     box-shadow: var(--shadow-md);
     transition: var(--transition-normal);
     border: 1px solid var(--border-color);
+    position: relative;
 }
+
 .service-card:hover, .master-card:hover {
     transform: translateY(-5px);
     box-shadow: var(--shadow-lg);
 }
+
 .service-card.selected, .master-card.selected {
     border: 2px solid var(--primary-color);
     box-shadow: 0 0 0 3px rgba(0, 167, 121, 0.1);
 }
+
 .service-img, .master-img {
     width: 100%;
     height: 200px;
     object-fit: cover;
     object-position: center;
 }
+
 .service-info, .master-info {
     padding: 20px;
 }
+
 .service-name, .master-name {
     font-weight: 600;
     font-size: 18px;
     margin-bottom: 8px;
     color: var(--text-dark);
 }
+
 .service-category, .master-specialization {
     color: var(--text-light);
     font-size: 14px;
     margin-bottom: 8px;
 }
+
 .service-price, .master-price {
     color: var(--primary-color);
     font-weight: 700;
     font-size: 20px;
     margin-top: 10px;
 }
+
 /* ===== ЕДИНЫЙ РАЗМЕР ИЗОБРАЖЕНИЙ ===== */
-/* Главные изображения на страницах */
 .salon-main-img img,
 .master-main-img img,
 .service-main-img img {
@@ -464,14 +531,14 @@ nav a.active::after {
     object-fit: cover;
     object-position: center;
 }
-/* Изображения в карточках рекомендаций */
+
 #recommendations-container .salon-card .salon-img {
     width: 100%;
     height: 200px;
     object-fit: cover;
     object-position: center;
 }
-/* Изображения авторов отзывов */
+
 .review-author-img {
     width: 50px;
     height: 50px;
@@ -479,6 +546,7 @@ nav a.active::after {
     object-fit: cover;
     object-position: center;
 }
+
 /* ===== СТРАНИЦА САЛОНА ===== */
 .salon-header {
     display: flex;
@@ -486,6 +554,7 @@ nav a.active::after {
     margin-bottom: 60px;
     align-items: flex-start;
 }
+
 .salon-main-img {
     flex: 1;
     position: relative;
@@ -493,11 +562,13 @@ nav a.active::after {
     overflow: hidden;
     min-height: 400px;
 }
+
 .salon-main-img img {
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
+
 .salon-rating-badge {
     position: absolute;
     top: 20px;
@@ -512,26 +583,32 @@ nav a.active::after {
     color: var(--text-dark);
     box-shadow: var(--shadow-md);
 }
+
 .salon-rating-badge i {
     color: #ffc107;
 }
+
 .salon-details {
     flex: 1;
 }
+
 .salon-details .page-title {
     font-size: 36px;
     margin-bottom: 10px;
 }
+
 .salon-details .page-subtitle {
     font-size: 18px;
     color: var(--text-light);
     margin-bottom: 20px;
 }
+
 .salon-actions {
     display: flex;
     gap: 16px;
     margin-top: 30px;
 }
+
 /* ===== СТРАНИЦА МАСТЕРА ===== */
 .master-header {
     display: flex;
@@ -539,6 +616,7 @@ nav a.active::after {
     margin-bottom: 60px;
     align-items: flex-start;
 }
+
 .master-main-img {
     flex: 1;
     position: relative;
@@ -546,11 +624,13 @@ nav a.active::after {
     overflow: hidden;
     min-height: 400px;
 }
+
 .master-main-img img {
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
+
 .master-rating-badge {
     position: absolute;
     top: 20px;
@@ -565,27 +645,33 @@ nav a.active::after {
     color: var(--text-dark);
     box-shadow: var(--shadow-md);
 }
+
 .master-rating-badge i {
     color: #ffc107;
 }
+
 .master-details {
     flex: 1;
 }
+
 .master-details .page-title {
     font-size: 36px;
     margin-bottom: 10px;
 }
+
 .master-details .page-subtitle {
     font-size: 18px;
     color: var(--text-light);
     margin-bottom: 20px;
 }
+
 .master-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 20px;
 }
+
 .master-tag {
     background: rgba(0, 167, 121, 0.1);
     color: var(--primary-color);
@@ -594,12 +680,14 @@ nav a.active::after {
     font-size: 12px;
     font-weight: 500;
 }
+
 .service-price-large {
     font-size: 32px;
     font-weight: 700;
     color: var(--primary-color);
     margin: 20px 0;
 }
+
 /* ===== СТРАНИЦА УСЛУГИ ===== */
 .service-header {
     display: flex;
@@ -607,28 +695,29 @@ nav a.active::after {
     margin-bottom: 60px;
     align-items: flex-start;
 }
+
 .service-main-img {
     flex: 1;
     border-radius: var(--radius-lg);
     overflow: hidden;
     min-height: 400px;
 }
+
 .service-main-img img {
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
+
 .service-details {
     flex: 1;
 }
+
 .service-details .page-title {
     font-size: 36px;
     margin-bottom: 10px;
 }
-/* ===== НОВЫЙ БЛОК: САЛОНЫ, ПРЕДОСТАВЛЯЮЩИЕ УСЛУГУ ===== */
-#service-salons-container {
-    margin-bottom: 40px;
-}
+
 /* ===== ОТЗЫВЫ ===== */
 .reviews-section {
     background: var(--light-bg);
@@ -636,9 +725,11 @@ nav a.active::after {
     padding: 40px;
     margin-top: 60px;
 }
+
 .reviews-list {
     margin-bottom: 40px;
 }
+
 .review-item {
     background: var(--white);
     border-radius: var(--radius-md);
@@ -647,12 +738,14 @@ nav a.active::after {
     box-shadow: var(--shadow-sm);
     border: 1px solid var(--border-color);
 }
+
 .review-header {
     display: flex;
     align-items: center;
     gap: 15px;
     margin-bottom: 15px;
 }
+
 .review-author-img {
     width: 50px;
     height: 50px;
@@ -660,59 +753,71 @@ nav a.active::after {
     object-fit: cover;
     border: 2px solid var(--primary-light);
 }
+
 .review-author {
     font-weight: 600;
     color: var(--text-dark);
 }
+
 .review-date {
     color: var(--text-lighter);
     font-size: 14px;
 }
+
 .review-rating-stars {
     display: flex;
     gap: 2px;
     margin: 10px 0;
 }
+
 .review-rating-stars i {
     color: #ffc107;
     font-size: 16px;
 }
+
 .review-text {
     color: var(--text-dark);
     line-height: 1.7;
     margin-bottom: 15px;
 }
+
 .add-review-form {
     background: var(--white);
     padding: 30px;
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color);
 }
+
 .review-rating {
     display: flex;
     align-items: center;
     gap: 15px;
     margin-bottom: 20px;
 }
+
 .stars {
     display: flex;
     gap: 5px;
     cursor: pointer;
 }
+
 .stars i {
     font-size: 24px;
     color: #e0e6eb;
     transition: var(--transition-fast);
 }
+
 .stars i:hover,
 .stars i.active {
     color: #ffc107;
 }
+
 #selected-rating-text {
     font-weight: 600;
     color: var(--text-dark);
     min-width: 70px;
 }
+
 /* ===== ПРОЦЕСС БРОНИРОВАНИЯ ===== */
 .booking-progress {
     display: flex;
@@ -723,6 +828,7 @@ nav a.active::after {
     margin-left: auto;
     margin-right: auto;
 }
+
 .booking-progress::before {
     content: '';
     position: absolute;
@@ -733,6 +839,7 @@ nav a.active::after {
     background: var(--border-color);
     z-index: 1;
 }
+
 .progress-step {
     display: flex;
     flex-direction: column;
@@ -741,6 +848,7 @@ nav a.active::after {
     z-index: 2;
     flex: 1;
 }
+
 .step-circle {
     width: 50px;
     height: 50px;
@@ -754,21 +862,25 @@ nav a.active::after {
     border: 3px solid var(--border-color);
     transition: var(--transition-normal);
 }
+
 .progress-step.active .step-circle {
     background: var(--primary-color);
     color: var(--white);
     border-color: var(--primary-color);
 }
+
 .step-name {
     font-weight: 500;
     color: var(--text-light);
     font-size: 14px;
     text-align: center;
 }
+
 .progress-step.active .step-name {
     color: var(--primary-color);
     font-weight: 600;
 }
+
 .booking-step {
     background: var(--white);
     padding: 40px;
@@ -778,21 +890,25 @@ nav a.active::after {
     margin-bottom: 30px;
     display: none;
 }
+
 .booking-step.active {
     display: block;
 }
+
 .booking-step-actions {
     display: flex;
     justify-content: flex-end;
     gap: 15px;
     margin-top: 40px;
 }
+
 .time-slots {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 15px;
     margin-top: 20px;
 }
+
 .time-slot {
     padding: 15px;
     text-align: center;
@@ -802,39 +918,46 @@ nav a.active::after {
     transition: var(--transition-fast);
     border: 2px solid transparent;
 }
+
 .time-slot:hover {
     background: var(--primary-extra-light);
     border-color: var(--primary-light);
 }
+
 .time-slot.selected {
     background: var(--primary-color);
     color: var(--white);
     border-color: var(--primary-color);
 }
+
 .time-slot.booked {
     background: #f8f9fa;
     color: var(--text-lighter);
     cursor: not-allowed;
     text-decoration: line-through;
 }
+
 .booking-summary {
     background: var(--light-bg);
     padding: 25px;
     border-radius: var(--radius-md);
     margin-bottom: 30px;
 }
+
 .summary-item {
     display: flex;
     justify-content: space-between;
     padding: 12px 0;
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
+
 .summary-total {
     font-weight: 700;
     font-size: 20px;
     color: var(--primary-color);
     margin-top: 10px;
 }
+
 /* ===== СТАТИСТИКА ===== */
 .stats-grid {
     display: grid;
@@ -842,6 +965,7 @@ nav a.active::after {
     gap: 20px;
     margin-bottom: 40px;
 }
+
 .stat-card {
     background: var(--white);
     padding: 25px;
@@ -851,16 +975,19 @@ nav a.active::after {
     border: 1px solid var(--border-color);
     transition: var(--transition-normal);
 }
+
 .stat-card:hover {
     transform: translateY(-5px);
     box-shadow: var(--shadow-md);
 }
+
 .stat-card h3 {
     font-size: 36px;
     font-weight: 700;
     color: var(--primary-color);
     margin-bottom: 10px;
 }
+
 .stat-card p {
     color: var(--text-light);
     font-size: 14px;
@@ -868,15 +995,7 @@ nav a.active::after {
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
-/* Убираем цветные полоски */
-.stat-card:nth-child(1),
-.stat-card:nth-child(2),
-.stat-card:nth-child(3),
-.stat-card:nth-child(4),
-.stat-card:nth-child(5),
-.stat-card:nth-child(6) {
-    border-top: none;
-}
+
 /* ===== АДМИН-ПАНЕЛЬ ===== */
 .admin-mode-switcher {
     display: flex;
@@ -888,6 +1007,7 @@ nav a.active::after {
     flex-wrap: wrap;
     gap: 5px;
 }
+
 .mode-btn {
     flex: 1;
     padding: 12px 15px;
@@ -901,17 +1021,20 @@ nav a.active::after {
     font-size: 14px;
     min-width: 180px;
 }
+
 .mode-btn.active {
     background: var(--white);
     color: var(--primary-color);
     box-shadow: var(--shadow-sm);
 }
+
 .admin-actions {
     display: flex;
     gap: 15px;
     margin-bottom: 30px;
     flex-wrap: wrap;
 }
+
 .admin-section {
     background: var(--white);
     border-radius: var(--radius-lg);
@@ -919,20 +1042,25 @@ nav a.active::after {
     margin-bottom: 40px;
     box-shadow: var(--shadow-md);
     border: 1px solid var(--border-color);
+    transition: opacity 0.3s ease;
 }
+
 .data-table-container {
     max-height: 500px;
     overflow-y: auto;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     margin-bottom: 20px;
+    background: var(--white);
 }
+
 .data-table {
     width: 100%;
     border-collapse: collapse;
     margin-top: 15px;
     font-size: 14px;
 }
+
 .data-table th {
     background: var(--light-bg);
     padding: 16px;
@@ -945,11 +1073,13 @@ nav a.active::after {
     z-index: 10;
     box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1);
 }
+
 .data-table td {
     padding: 16px;
     border-bottom: 1px solid var(--border-color);
     vertical-align: middle;
 }
+
 .action-btn {
     padding: 8px 16px;
     margin-right: 8px;
@@ -960,26 +1090,32 @@ nav a.active::after {
     font-weight: 500;
     font-size: 13px;
 }
+
 .action-btn.edit {
     background: var(--warning-color);
     color: var(--white);
 }
+
 .action-btn.delete {
     background: var(--error-color);
     color: var(--white);
 }
+
 .action-btn.complete {
     background: var(--success-color);
     color: var(--white);
 }
+
 .action-btn.cancel {
     background: #95a5a6;
     color: var(--white);
 }
+
 .action-btn.undo {
     background: var(--info-color);
     color: var(--white);
 }
+
 .master-welcome {
     background: linear-gradient(135deg, var(--primary-color), var(--primary-bg));
     color: var(--white);
@@ -987,18 +1123,21 @@ nav a.active::after {
     border-radius: var(--radius-lg);
     margin-bottom: 30px;
 }
+
 .schedule-controls {
     display: flex;
     gap: 15px;
     margin-bottom: 25px;
     flex-wrap: wrap;
 }
+
 .days-off-list {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
     margin-top: 20px;
 }
+
 .day-off-item {
     background: var(--light-bg);
     padding: 10px 20px;
@@ -1008,6 +1147,7 @@ nav a.active::after {
     gap: 10px;
     border: 1px solid var(--border-color);
 }
+
 .history-filters {
     display: flex;
     gap: 20px;
@@ -1015,27 +1155,33 @@ nav a.active::after {
     flex-wrap: wrap;
     align-items: flex-end;
 }
+
 .history-filters .filter-group {
     min-width: 200px;
 }
-/* ===== КНОПКА ОЧИСТКИ ИСТОРИИ (ДОБАВЛЕНО) ===== */
+
+/* ===== КНОПКА ОЧИСТКИ ИСТОРИИ ===== */
 .btn-danger {
     background: var(--error-color);
     color: var(--white);
 }
+
 .btn-danger:hover {
     background: #c0392b;
 }
+
 /* ===== ФОРМЫ ===== */
 .form-group {
     margin-bottom: 24px;
 }
+
 .form-label {
     display: block;
     margin-bottom: 8px;
     font-weight: 500;
     color: var(--text-dark);
 }
+
 .form-input, .form-textarea, .form-select {
     width: 100%;
     padding: 16px;
@@ -1045,34 +1191,52 @@ nav a.active::after {
     transition: var(--transition-fast);
     background: var(--white);
 }
+
 .form-input:focus, .form-textarea:focus, .form-select:focus {
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(0, 167, 121, 0.1);
 }
+
 .form-textarea {
     resize: vertical;
     min-height: 120px;
     font-family: inherit;
 }
+
 .checkbox-group {
     display: flex;
-    flex-wrap: wrap;
-    gap: 15px;
-    margin-top: 10px;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    padding: 15px;
+    border-radius: var(--radius-md);
+    background: var(--white);
 }
-.checkbox-group label {
+
+.checkbox-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    color: var(--text-dark);
+    gap: 10px;
+    padding: 5px 0;
 }
-.checkbox-group input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
+
+.checkbox-item input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
     accent-color: var(--primary-color);
+    cursor: pointer;
 }
+
+.checkbox-item label {
+    cursor: pointer;
+    font-size: 16px;
+    color: var(--text-dark);
+    flex: 1;
+}
+
 /* ===== ПРЕВЬЮ ИЗОБРАЖЕНИЙ ===== */
 .image-preview {
     margin-top: 15px;
@@ -1080,6 +1244,7 @@ nav a.active::after {
     gap: 15px;
     flex-wrap: wrap;
 }
+
 .image-preview-item {
     position: relative;
     width: 150px;
@@ -1088,12 +1253,13 @@ nav a.active::after {
     overflow: hidden;
     border: 2px solid var(--border-color);
 }
+
 .image-preview-item img {
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
-/* ===== СТИЛИ ДЛЯ ПРЕВЬЮ ПРИ ДОБАВЛЕНИИ ЧЕРЕЗ ССЫЛКУ ===== */
+
 .image-preview img {
     max-width: 200px;
     max-height: 200px;
@@ -1101,6 +1267,7 @@ nav a.active::after {
     border: 2px solid var(--border-color);
     object-fit: cover;
 }
+
 /* ===== МОДАЛЬНЫЕ ОКНА ===== */
 .modal {
     display: none;
@@ -1116,14 +1283,17 @@ nav a.active::after {
     justify-content: center;
     padding: 20px;
 }
+
 .modal.active {
     display: flex;
     animation: fadeIn 0.3s ease;
 }
+
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
 }
+
 .modal-content {
     background: var(--white);
     border-radius: var(--radius-lg);
@@ -1134,7 +1304,20 @@ nav a.active::after {
     padding: 40px;
     position: relative;
     box-shadow: var(--shadow-lg);
+    animation: modalSlideIn 0.3s ease;
 }
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-50px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 .modal-close {
     position: absolute;
     top: 20px;
@@ -1152,26 +1335,31 @@ nav a.active::after {
     border-radius: 50%;
     transition: var(--transition-fast);
 }
+
 .modal-close:hover {
     background: var(--light-bg);
     color: var(--error-color);
 }
+
 .modal-title {
     font-size: 28px;
     margin-bottom: 25px;
     color: var(--text-dark);
     font-weight: 700;
 }
+
 .modal-actions {
     display: flex;
     justify-content: space-between;
     margin-top: 30px;
 }
+
 .auth-tabs {
     display: flex;
     margin-bottom: 30px;
     border-bottom: 2px solid var(--border-color);
 }
+
 .auth-tab {
     padding: 15px 30px;
     background: none;
@@ -1183,9 +1371,11 @@ nav a.active::after {
     position: relative;
     transition: var(--transition-fast);
 }
+
 .auth-tab.active {
     color: var(--primary-color);
 }
+
 .auth-tab.active::after {
     content: '';
     position: absolute;
@@ -1196,13 +1386,16 @@ nav a.active::after {
     background: var(--primary-color);
     border-radius: 3px 3px 0 0;
 }
+
 .auth-form {
     display: none;
 }
+
 .auth-form.active {
     display: block;
     animation: slideIn 0.3s ease;
 }
+
 @keyframes slideIn {
     from {
         opacity: 0;
@@ -1213,19 +1406,23 @@ nav a.active::after {
         transform: translateY(0);
     }
 }
+
 .auth-switch {
     text-align: center;
     margin-top: 25px;
     color: var(--text-light);
 }
+
 .auth-switch a {
     color: var(--primary-color);
     text-decoration: none;
     font-weight: 500;
 }
+
 .auth-switch a:hover {
     text-decoration: underline;
 }
+
 /* ===== УВЕДОМЛЕНИЯ ===== */
 .notification {
     position: fixed;
@@ -1245,6 +1442,7 @@ nav a.active::after {
     gap: 12px;
     animation: slideInRight 0.3s ease;
 }
+
 @keyframes slideInRight {
     from {
         transform: translateX(100%);
@@ -1255,22 +1453,27 @@ nav a.active::after {
         opacity: 1;
     }
 }
+
 .notification.success {
     background: linear-gradient(135deg, var(--success-color), #27ae60);
     border-left: 5px solid #219653;
 }
+
 .notification.error {
     background: linear-gradient(135deg, var(--error-color), #c0392b);
     border-left: 5px solid #d32f2f;
 }
+
 .notification.warning {
     background: linear-gradient(135deg, var(--warning-color), #e67e22);
     border-left: 5px solid #f57c00;
 }
+
 .notification.hiding {
     opacity: 0;
     transform: translateX(100%);
 }
+
 /* ===== ФУТЕР ===== */
 footer {
     background: var(--text-dark);
@@ -1278,18 +1481,21 @@ footer {
     padding: 60px 0 30px;
     margin-top: 80px;
 }
+
 .footer-content {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 40px;
     margin-bottom: 40px;
 }
+
 .footer-section h3 {
     font-size: 20px;
     font-weight: 700;
     margin-bottom: 25px;
     color: var(--white);
 }
+
 .footer-section p, .footer-section a {
     color: rgba(255, 255, 255, 0.8);
     text-decoration: none;
@@ -1297,15 +1503,18 @@ footer {
     display: block;
     transition: var(--transition-fast);
 }
+
 .footer-section a:hover {
     color: var(--primary-light);
     transform: translateX(5px);
 }
+
 .footer-section i {
     color: var(--primary-light);
     margin-right: 12px;
     width: 20px;
 }
+
 .copyright {
     text-align: center;
     padding-top: 30px;
@@ -1313,6 +1522,7 @@ footer {
     color: rgba(255, 255, 255, 0.6);
     font-size: 14px;
 }
+
 /* ===== СТИЛИ ДЛЯ КНОПОК ===== */
 .btn {
     padding: 12px 24px;
@@ -1327,14 +1537,17 @@ footer {
     gap: 8px;
     text-decoration: none;
 }
+
 .btn:hover:not(:disabled) {
     transform: translateY(-2px);
     box-shadow: var(--shadow-md);
 }
+
 .btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
+
 .btn-action {
     padding: 8px 16px;
     border: none;
@@ -1347,39 +1560,47 @@ footer {
     align-items: center;
     gap: 6px;
 }
+
 .btn-action.primary {
     background: var(--primary-color);
     color: var(--white);
 }
+
 .btn-action.secondary {
     background: var(--light-bg);
     color: var(--text-dark);
     border: 1px solid var(--border-color);
 }
+
 .btn-action.danger {
     background: var(--error-color);
     color: var(--white);
 }
+
 .btn-action:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-sm);
 }
+
 /* ===== УТИЛИТЫ ===== */
 .page {
     display: none;
     min-height: calc(100vh - 200px);
     padding: 40px 0;
 }
+
 .page.active {
     display: block;
     animation: fadeIn 0.5s ease;
 }
+
 .page-title {
     font-size: 36px;
     font-weight: 700;
     margin-bottom: 30px;
     color: var(--text-dark);
 }
+
 .auth-required-message {
     text-align: center;
     padding: 50px 0;
@@ -1387,12 +1608,14 @@ footer {
     background: var(--light-bg);
     border-radius: var(--radius-md);
 }
+
 .no-results {
     text-align: center;
     padding: 60px 20px;
     color: var(--text-light);
     grid-column: 1 / -1;
 }
+
 .loading {
     display: flex;
     justify-content: center;
@@ -1401,20 +1624,24 @@ footer {
     color: var(--text-light);
     animation: pulse 1.5s infinite;
 }
+
 .loading i {
     font-size: 24px;
     margin-right: 10px;
     animation: spin 1s linear infinite;
 }
+
 @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
+
 @keyframes pulse {
     0% { opacity: 0.6; }
     50% { opacity: 1; }
     100% { opacity: 0.6; }
 }
+
 /* ===== СТИЛИ ДЛЯ МАСТЕР-ПАНЕЛИ ===== */
 .master-panel {
     background: var(--white);
@@ -1424,6 +1651,7 @@ footer {
     box-shadow: var(--shadow-md);
     border: 2px solid var(--primary-color);
 }
+
 .master-info-card {
     background: linear-gradient(135deg, var(--primary-color), var(--primary-bg));
     color: var(--white);
@@ -1431,36 +1659,58 @@ footer {
     border-radius: var(--radius-md);
     margin-bottom: 25px;
 }
+
 .master-info-card h3 {
     margin-bottom: 15px;
     font-size: 24px;
 }
+
 .master-details {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 15px;
     margin-top: 20px;
 }
+
 .master-detail {
     background: rgba(255, 255, 255, 0.1);
     padding: 12px 15px;
     border-radius: var(--radius-sm);
 }
+
 .master-detail label {
     display: block;
     font-size: 12px;
     opacity: 0.8;
     margin-bottom: 5px;
 }
+
 .master-detail span {
     font-weight: 600;
 }
+
 .master-actions {
     display: flex;
     gap: 10px;
     margin-top: 20px;
     flex-wrap: wrap;
 }
+
+/* ===== ПЕРЕКЛЮЧАТЕЛЬ МАСТЕРОВ ===== */
+.master-switcher {
+    background: var(--light-bg);
+    padding: 20px;
+    border-radius: var(--radius-md);
+    margin-bottom: 20px;
+    border: 1px solid var(--border-color);
+}
+
+.master-switcher label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
 /* ===== СТИЛИ ДЛЯ КАЛЕНДАРЯ МАСТЕРА ===== */
 .master-calendar {
     display: grid;
@@ -1468,29 +1718,34 @@ footer {
     gap: 30px;
     margin-top: 20px;
 }
+
 .calendar-widget {
     background: var(--white);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     padding: 20px;
 }
+
 .calendar-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
 }
+
 .calendar-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
     gap: 5px;
 }
+
 .calendar-day {
     text-align: center;
     padding: 10px 5px;
     font-size: 14px;
     font-weight: 500;
 }
+
 .calendar-date {
     text-align: center;
     padding: 12px 5px;
@@ -1499,27 +1754,33 @@ footer {
     transition: var(--transition-fast);
     font-size: 14px;
 }
+
 .calendar-date:hover {
     background: var(--light-bg);
 }
+
 .calendar-date.selected {
     background: var(--primary-color);
     color: var(--white);
 }
+
 .calendar-date.day-off {
     background: #ffeaea;
     color: #e74c3c;
     cursor: not-allowed;
 }
+
 .calendar-date.booked {
     background: #e0e6eb;
     color: var(--text-lighter);
     cursor: not-allowed;
 }
+
 .calendar-date.weekend {
     color: #e74c3c;
     font-weight: 600;
 }
+
 .bookings-list {
     background: var(--white);
     border: 1px solid var(--border-color);
@@ -1528,6 +1789,80 @@ footer {
     max-height: 500px;
     overflow-y: auto;
 }
+
+.booking-card {
+    background: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 15px;
+    margin-bottom: 15px;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    transition: var(--transition-fast);
+}
+
+.booking-card:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.booking-card .booking-time {
+    font-weight: 600;
+    color: var(--primary-color);
+    font-size: 16px;
+    margin-bottom: 5px;
+}
+
+.booking-card .booking-service {
+    font-weight: 500;
+    margin-bottom: 5px;
+}
+
+.booking-card .booking-client {
+    color: var(--text-light);
+    font-size: 14px;
+    margin-bottom: 5px;
+}
+
+.booking-card .booking-price {
+    font-weight: 600;
+    color: var(--text-dark);
+}
+
+.booking-card .booking-actions {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 5px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+@media (min-width: 769px) {
+    .booking-card:hover .booking-actions {
+        opacity: 1;
+    }
+}
+
+.booking-card .booking-actions button {
+    background: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.booking-card .booking-actions button:hover {
+    background: var(--primary-color);
+    color: var(--white);
+    border-color: var(--primary-color);
+}
+
 .booking-item {
     padding: 15px;
     border-bottom: 1px solid var(--border-color);
@@ -1535,75 +1870,75 @@ footer {
     justify-content: space-between;
     align-items: center;
 }
+
 .booking-item:last-child {
     border-bottom: none;
 }
+
 .booking-time {
     font-weight: 600;
     color: var(--text-dark);
     min-width: 80px;
 }
+
 .booking-service {
     flex: 1;
     margin: 0 15px;
 }
+
 .booking-client {
     color: var(--text-light);
     font-size: 14px;
     min-width: 150px;
 }
+
 .booking-status {
     padding: 4px 12px;
     border-radius: 50px;
     font-size: 12px;
     font-weight: 600;
 }
+
 .booking-status.confirmed {
     background: #d4edda;
     color: #155724;
 }
+
 .booking-status.completed {
     background: #cce5ff;
     color: #004085;
 }
+
 .booking-status.cancelled {
     background: #f8d7da;
     color: #721c24;
 }
-/* ===== УЛУЧШЕНИЯ ДЛЯ МОДАЛЬНЫХ ОКНОН===== */
-.modal-content {
-    animation: modalSlideIn 0.3s ease;
-}
-@keyframes modalSlideIn {
-    from {
-        opacity: 0;
-        transform: translateY(-50px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
+
 /* ===== СТИЛИ ДЛЯ СКРОЛЛБАРА ===== */
 ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
+
 ::-webkit-scrollbar-track {
     background: var(--light-bg);
     border-radius: 4px;
 }
+
 ::-webkit-scrollbar-thumb {
     background: var(--primary-light);
     border-radius: 4px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
     background: var(--primary-color);
 }
+
 /* ===== ДОПОЛНИТЕЛЬНЫЕ СТИЛИ ===== */
 .phone-input {
     position: relative;
 }
+
 .phone-input::before {
     content: '+7';
     position: absolute;
@@ -1613,9 +1948,11 @@ footer {
     color: var(--text-light);
     font-weight: 500;
 }
+
 .phone-input input {
     padding-left: 40px !important;
 }
+
 .specialization-select select {
     appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2300A779' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
@@ -1624,16 +1961,16 @@ footer {
     background-size: 12px;
     padding-right: 40px;
 }
-/* Скрываем рекомендации при поиске */
+
 #recommendations-section.hidden {
     display: none !important;
 }
-/* Стиль для заблокированного поиска с email */
+
 .search-input-blocked {
     border-color: var(--error-color) !important;
     background-color: #ffeaea !important;
 }
-/* Стили для предотвращения автозаполнения */
+
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
@@ -1641,6 +1978,219 @@ input:-webkit-autofill:active {
     transition: background-color 5000s ease-in-out 0s;
     -webkit-text-fill-color: var(--text-dark) !important;
 }
+
+/* ===== ДОПОЛНИТЕЛЬНЫЕ СТИЛИ ДЛЯ АДМИН-ПАНЕЛИ ===== */
+.admin-section .data-table-container .services-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+    padding: 10px;
+    max-height: 450px;
+    overflow-y: auto;
+}
+
+.admin-section .data-table-container .services-grid::-webkit-scrollbar {
+    width: 8px;
+}
+
+.admin-section .data-table-container .services-grid::-webkit-scrollbar-track {
+    background: var(--light-bg);
+    border-radius: 4px;
+}
+
+.admin-section .data-table-container .services-grid::-webkit-scrollbar-thumb {
+    background: var(--primary-light);
+    border-radius: 4px;
+}
+
+.admin-section .data-table-container .services-grid::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-color);
+}
+
+#admin-services-grid .service-card {
+    margin-bottom: 0;
+    transition: var(--transition-normal);
+}
+
+#admin-services-grid .service-card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-lg);
+}
+
+#admin-services-grid .service-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+    justify-content: flex-end;
+}
+
+#admin-services-grid .btn-action {
+    padding: 8px 16px;
+    font-size: 13px;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+#admin-services-grid .btn-action.primary {
+    background: var(--warning-color);
+    color: var(--white);
+}
+
+#admin-services-grid .btn-action.danger {
+    background: var(--error-color);
+    color: var(--white);
+}
+
+#admin-services-grid .btn-action:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+}
+
+#master-services-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 20px;
+    padding: 10px;
+}
+
+#master-services-list .service-card {
+    position: relative;
+    background: var(--white);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border-color);
+}
+
+#master-services-list .service-card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-lg);
+}
+
+#master-services-list .remove-service-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: var(--error-color);
+    color: var(--white);
+    border: none;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    opacity: 0.8;
+}
+
+#master-services-list .remove-service-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+/* ===== СТИЛИ ДЛЯ УПРАВЛЕНИЯ УСЛУГАМИ ===== */
+#service-management-modal .modal-content {
+    max-width: 800px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+#service-management-modal .checkbox-group {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 10px;
+    margin-bottom: 15px;
+}
+
+#service-management-modal .checkbox-item {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#service-management-modal .checkbox-item:last-child {
+    border-bottom: none;
+}
+
+#service-management-modal .checkbox-item input[type="checkbox"] {
+    margin-right: 10px;
+}
+
+#service-management-modal .checkbox-item label {
+    flex: 1;
+    cursor: default;
+}
+
+#service-management-modal .btn-action.remove-from-salon,
+#service-management-modal .btn-action.remove-from-master {
+    background: var(--error-color);
+    color: white;
+    padding: 4px 8px;
+    font-size: 11px;
+    border-radius: var(--radius-sm);
+}
+
+#service-management-modal .btn-action.remove-from-salon:hover,
+#service-management-modal .btn-action.remove-from-master:hover {
+    opacity: 0.8;
+    transform: translateY(-1px);
+}
+
+#service-management-modal .form-group {
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#service-management-modal .form-group:last-child {
+    border-bottom: none;
+}
+
+#service-management-modal h3 {
+    font-size: 16px;
+    margin-bottom: 10px;
+    color: var(--primary-color);
+}
+
+/* Стили для модального окна деталей услуги */
+#service-details-modal .modal-content {
+    max-width: 600px;
+}
+
+#service-details-modal ul {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 10px;
+}
+
+#service-details-modal li {
+    padding: 8px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+}
+
+#service-details-modal li:last-child {
+    border-bottom: none;
+}
+
+#service-details-modal li i {
+    width: 20px;
+    text-align: center;
+}
+
 /* ===== АДАПТИВНОСТЬ ===== */
 @media (max-width: 1024px) {
     .hero-title {
@@ -1661,6 +2211,7 @@ input:-webkit-autofill:active {
         grid-template-columns: 1fr;
     }
 }
+
 @media (max-width: 768px) {
     .header-container {
         flex-direction: column;
@@ -1760,7 +2311,37 @@ input:-webkit-autofill:active {
     .master-actions {
         flex-direction: column;
     }
+    .booking-card .booking-actions {
+        opacity: 1;
+        position: static;
+        justify-content: flex-end;
+        margin-top: 10px;
+    }
+    .booking-card .booking-actions button {
+        width: 40px;
+        height: 40px;
+    }
+    .admin-section .data-table-container .services-grid {
+        grid-template-columns: 1fr;
+    }
+    #master-services-list {
+        grid-template-columns: 1fr;
+    }
+    .data-table-container {
+        max-height: 400px;
+    }
+    
+    #service-management-modal .checkbox-item {
+        flex-wrap: wrap;
+    }
+    
+    #service-management-modal .btn-action.remove-from-salon,
+    #service-management-modal .btn-action.remove-from-master {
+        margin-top: 5px;
+        width: 100%;
+    }
 }
+
 @media (max-width: 480px) {
     .hero-title {
         font-size: 28px;
@@ -1801,17 +2382,38 @@ input:-webkit-autofill:active {
     .master-info-card {
         padding: 20px;
     }
-    /* ===== ПЕРЕКЛЮЧАТЕЛЬ МАСТЕРОВ ===== */
-    .master-switcher {
-        background: var(--light-bg);
+    .admin-section .data-table-container .services-grid {
+        padding: 5px;
+        gap: 15px;
+    }
+    #admin-services-grid .service-actions {
+        flex-direction: column;
+    }
+    #admin-services-grid .btn-action {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    #service-management-modal .modal-content {
         padding: 20px;
-        border-radius: var(--radius-md);
-        margin-bottom: 20px;
-        border: 1px solid var(--border-color);
+        margin: 10px;
     }
-    .master-switcher label {
-        display: block;
-        margin-bottom: 8px;
-        font-weight: 500;
+    
+    #service-management-modal .checkbox-item {
+        flex-wrap: wrap;
     }
+    
+    #service-management-modal .btn-action.remove-from-salon,
+    #service-management-modal .btn-action.remove-from-master {
+        margin-top: 5px;
+        width: 100%;
+    }
+}
+
+#admin-services-grid .service-actions {
+    flex-direction: column;
+}
+
+#admin-services-grid .btn-action {
+    width: 100%;
 }

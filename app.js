@@ -20,7 +20,7 @@ const auth = firebase.auth();
 const storage = firebase.storage();
 
 // ==============================================
-// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ И КЭШИРОВАНИЕ
 // ==============================================
 let currentUser = null;
 let currentSalon = null;
@@ -37,12 +37,28 @@ let editingMasterId = null;
 let editingSalonId = null;
 let editingServiceId = null;
 let currentCalendarMonth = new Date();
-let actionsHistory = [];
 let currentActiveMasterId = null;
 let searchTimeout = null;
 
+// Кэш для данных
+const cache = {
+    salons: null,
+    services: null,
+    masters: null,
+    users: null,
+    bookings: null,
+    reviews: null,
+    uniqueServices: null,
+    serviceDetails: new Map(),
+    salonServices: new Map(),
+    masterServices: new Map(),
+    lastFetch: 0
+};
+
+const CACHE_TTL = 5 * 60 * 1000; // 5 минут
+
 // ==============================================
-// НОВАЯ ФУНКЦИЯ: сопоставление специализации и категории услуги
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ==============================================
 function getCategoryFromSpecialization(specialization) {
     const map = {
@@ -60,11 +76,8 @@ function getCategoryFromSpecialization(specialization) {
     return map[specialization] || null;
 }
 
-// ==============================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-// ==============================================
 function getSafeImageUrl(type = 'salon', text = '') {
-    return 'orig.jpg';
+    return `https://via.placeholder.com/300x200?text=${encodeURIComponent(text || type)}`;
 }
 
 function renderStars(rating, maxStars = 5) {
@@ -137,21 +150,22 @@ function formatDateTime(dateString) {
 function showNotification(message, type = 'success') {
     const notificationContainer = document.getElementById('notification-container');
     if (!notificationContainer) return;
-    
+
     const notification = document.createElement('div');
     notification.className = `notification ${type}`;
-    
+
     let icon = 'check-circle';
     if (type === 'error') icon = 'exclamation-circle';
     if (type === 'warning') icon = 'exclamation-triangle';
-    
+    if (type === 'info') icon = 'info-circle';
+
     notification.innerHTML = `
         <i class="fas fa-${icon}"></i>
         <span>${message}</span>
     `;
-    
+
     notificationContainer.appendChild(notification);
-    
+
     setTimeout(() => {
         notification.classList.add('hiding');
         setTimeout(() => {
@@ -159,100 +173,133 @@ function showNotification(message, type = 'success') {
                 notification.remove();
             }
         }, 500);
-    }, 5000);
+    }, 3000);
 }
 
-function showPage(pageId) {
-    document.querySelectorAll('.page').forEach(page => {
-        page.classList.remove('active');
-    });
+// ==============================================
+// ФУНКЦИИ ДЛЯ ПОДДЕРЖКИ ПРЯМЫХ ССЫЛОК
+// ==============================================
+function parseHash() {
+    const hash = window.location.hash.substring(1);
+    if (!hash) return { page: 'home' };
     
+    if (hash.startsWith('service/')) {
+        const serviceName = decodeURIComponent(hash.substring(8));
+        return { page: 'service', serviceName };
+    }
+    
+    const parts = hash.split('?');
+    const page = parts[0];
+    const params = new URLSearchParams(parts[1] || '');
+    return { page, params };
+}
+
+// Исправленная функция parseHash
+function parseHash() {
+    const hash = window.location.hash.substring(1);
+    if (!hash) return { page: 'home', params: new URLSearchParams() };
+    
+    if (hash.startsWith('service/')) {
+        const serviceName = decodeURIComponent(hash.substring(8));
+        return { page: 'service', serviceName, params: new URLSearchParams() };
+    }
+    
+    const parts = hash.split('?');
+    const page = parts[0];
+    const params = new URLSearchParams(parts[1] || ''); // Гарантируем создание объекта
+    
+    return { page, params };
+}
+
+//  функция showPageFromHash
+function showPageFromHash() {
+    const { page, params, serviceName } = parseHash();
+    
+    if (page === 'service' && serviceName) {
+        showServicePage(serviceName);
+        return;
+    }
+    
+    if (!page) {
+        showPage('home-page');
+        return;
+    }
+    
+    const pageId = page + '-page';
+    if (document.getElementById(pageId)) {
+        // ДОБАВЛЕНА ПРОВЕРКА на существование params
+        if (params && params.has('id')) {
+            const id = params.get('id');
+            if (page === 'master') {
+                loadMasterPage(id).then(() => showPage('master-page'));
+                return;
+            } else if (page === 'salon') {
+                loadSalonPage(id).then(() => showPage('salon-page'));
+                return;
+            }
+        }
+        showPage(pageId);
+    } else {
+        showPage('home-page');
+    }
+}
+// ==============================================
+// ФУНКЦИЯ showPage
+// ==============================================
+function showPage(pageId) {
+    document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
     const pageElement = document.getElementById(pageId);
     if (pageElement) {
         pageElement.classList.add('active');
         window.scrollTo(0, 0);
         
-        if (window.location.hash !== `#${pageId}`) {
-            history.pushState({ page: pageId }, '', `#${pageId}`);
-        }
+        const basePage = pageId.replace('-page', '');
+        history.pushState({ page: pageId }, '', `#${basePage}`);
         
-        switch(pageId) {
-            case 'home-page':
-                loadSalonsWithFilters();
-                loadRecommendations();
-                loadReviews();
-                break;
-            case 'salons-page':
-                loadAllSalons();
-                break;
-            case 'services-page':
-                loadAllServices();
-                break;
-            case 'masters-page':
-                loadAllMasters();
-                break;
-            case 'salon-page':
-                break;
-            case 'master-page':
-                if (selectedMaster) loadMasterPage(selectedMaster.id);
-                break;
-            case 'service-page':
-                if (selectedService) {
-                    if (selectedService.salons) {
-                        // уже загружено через loadUniqueServicePage
-                    } else {
-                        loadServicePage(selectedService.id);
-                    }
-                }
-                break;
-            case 'admin-page':
-                setupAdminPage();
-                break;
-            case 'profile-page':
-                loadUserBookings();
-                break;
-            case 'master-schedule-page':
-                loadMasterSchedulePage();
-                break;
-        }
+        setTimeout(() => {
+            switch (pageId) {
+                case 'home-page':
+                    loadHomePage();
+                    break;
+                case 'salons-page':
+                    loadAllSalons();
+                    break;
+                case 'services-page':
+                    loadAllServices();
+                    break;
+                case 'masters-page':
+                    loadAllMasters();
+                    break;
+                case 'salon-page':
+                    if (currentSalon) loadSalonPage(currentSalon.id);
+                    break;
+                case 'master-page':
+                    if (selectedMaster) loadMasterPage(selectedMaster.id);
+                    break;
+                case 'service-page':
+                    break;
+                case 'admin-page':
+                    setupAdminPage();
+                    break;
+                case 'profile-page':
+                    loadUserBookings();
+                    break;
+                case 'master-schedule-page':
+                    loadMasterSchedulePage();
+                    break;
+            }
+        }, 10);
     }
 }
 
-window.addEventListener('popstate', (event) => {
-    const hash = window.location.hash.substring(1);
-    if (hash) {
-        showPage(hash);
-    } else {
-        showPage('home-page');
-    }
-});
-
-window.addEventListener('load', () => {
-    const hash = window.location.hash.substring(1);
-    if (hash && document.getElementById(hash)) {
-        showPage(hash);
-    } else {
-        showPage('home-page');
-    }
-});
-
+// ==============================================
+// ФУНКЦИИ РАБОТЫ С МОДАЛЬНЫМИ ОКНАМИ
+// ==============================================
 function showModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) {
         modal.classList.add('active');
         document.body.style.overflow = 'hidden';
-        
-        if (modalId === 'profile-modal') {
-            document.getElementById('login-email').value = '';
-            document.getElementById('login-password').value = '';
-            document.getElementById('register-email').value = '';
-            document.getElementById('register-password').value = '';
-            document.getElementById('register-password-confirm').value = '';
-            document.getElementById('register-name').value = '';
-            document.getElementById('register-lastname').value = '';
-            document.getElementById('register-phone').value = '';
-            document.getElementById('register-role').value = 'client';
-        }
     }
 }
 
@@ -261,11 +308,18 @@ function hideModal(modalId) {
     if (modal) {
         modal.classList.remove('active');
         document.body.style.overflow = 'auto';
-        
-        if (modalId === 'profile-modal') {
-            document.getElementById('login-email').value = '';
-            document.getElementById('login-password').value = '';
-        }
+    }
+}
+
+function clearModalFields(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], input[type="tel"], input[type="number"], textarea').forEach(field => {
+            field.value = '';
+        });
+        modal.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        modal.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
+        modal.querySelectorAll('.image-preview').forEach(preview => preview.innerHTML = '');
     }
 }
 
@@ -274,71 +328,260 @@ function hideModal(modalId) {
 // ==============================================
 async function uploadImage(file, folder) {
     if (!file) return null;
-    
+
     const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
         showNotification('Файл слишком большой. Максимальный размер 5 МБ.', 'error');
         return null;
     }
-    
+
     const storageRef = storage.ref();
     const safeFileName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
     const fileName = `${Date.now()}_${safeFileName}`;
     const fileRef = storageRef.child(`${folder}/${fileName}`);
-    
-    const uploadTask = fileRef.put(file);
-    
-    const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('timeout')), 30000);
-    });
-    
+
     try {
-        await Promise.race([uploadTask, timeoutPromise]);
+        await fileRef.put(file);
         const downloadUrl = await fileRef.getDownloadURL();
         return downloadUrl;
     } catch (error) {
         console.error('Ошибка загрузки изображения:', error);
-        if (error.message === 'timeout') {
-            showNotification('Загрузка превысила время ожидания. Попробуйте ещё раз или используйте ссылку.', 'error');
-        } else if (error.code === 'storage/unauthorized') {
-            showNotification('Нет прав для загрузки файла. Проверьте правила Firebase Storage.', 'error');
-        } else if (error.code === 'storage/canceled') {
-            showNotification('Загрузка отменена.', 'warning');
-        } else {
-            showNotification('Ошибка загрузки изображения. Проверьте соединение или попробуйте другой файл.', 'error');
-        }
+        showNotification('Ошибка загрузки изображения. Проверьте соединение.', 'error');
         return null;
     }
 }
 
 // ==============================================
-// ФУНКЦИИ РАБОТЫ С FIREBASE
+// ОПТИМИЗИРОВАННЫЕ ФУНКЦИИ ПОЛУЧЕНИЯ ДАННЫХ
 // ==============================================
+async function getCachedData(collection, force = false) {
+    const now = Date.now();
+    
+    if (!force && cache[collection] && (now - cache.lastFetch) < CACHE_TTL) {
+        return cache[collection];
+    }
+    
+    try {
+        const snapshot = await db.collection(collection).get();
+        const data = [];
+        snapshot.forEach(doc => {
+            data.push({ id: doc.id, ...doc.data() });
+        });
+        
+        cache[collection] = data;
+        cache.lastFetch = now;
+        return data;
+    } catch (error) {
+        console.error(`Ошибка загрузки ${collection}:`, error);
+        return cache[collection] || [];
+    }
+}
+
+function clearCache() {
+    cache.salons = null;
+    cache.services = null;
+    cache.masters = null;
+    cache.users = null;
+    cache.bookings = null;
+    cache.reviews = null;
+    cache.uniqueServices = null;
+    cache.serviceDetails.clear();
+    cache.salonServices.clear();
+    cache.masterServices.clear();
+    cache.lastFetch = 0;
+}
+
+// ==============================================
+// ФУНКЦИИ ДЛЯ УНИКАЛЬНЫХ УСЛУГ
+// ==============================================
+async function getUniqueServices(force = false) {
+    if (!force && cache.uniqueServices) {
+        return cache.uniqueServices;
+    }
+    
+    try {
+        const services = await getCachedData('services', force);
+        const serviceMap = new Map();
+        
+        services.forEach(service => {
+            const key = service.name.toLowerCase().trim();
+            if (serviceMap.has(key)) {
+                const existing = serviceMap.get(key);
+                if (service.salonId && !existing.salonIds.includes(service.salonId)) {
+                    existing.salonIds.push(service.salonId);
+                }
+                if (!existing.imageUrl && service.imageUrl) {
+                    existing.imageUrl = service.imageUrl;
+                }
+                existing.serviceIds.push(service.id);
+            } else {
+                serviceMap.set(key, {
+                    ...service,
+                    salonIds: service.salonId ? [service.salonId] : [],
+                    serviceIds: [service.id]
+                });
+            }
+        });
+        
+        cache.uniqueServices = Array.from(serviceMap.values());
+        return cache.uniqueServices;
+    } catch (error) {
+        console.error('Ошибка загрузки уникальных услуг:', error);
+        return [];
+    }
+}
+
+async function getServiceDetails(serviceName) {
+    const cacheKey = serviceName.toLowerCase().trim();
+    
+    if (cache.serviceDetails.has(cacheKey)) {
+        return cache.serviceDetails.get(cacheKey);
+    }
+    
+    try {
+        const services = await getCachedData('services');
+        const masters = await getCachedData('masters');
+        const salons = await getCachedData('salons');
+        
+        const serviceInstances = services.filter(s => 
+            s.name.toLowerCase().trim() === cacheKey
+        );
+        
+        if (serviceInstances.length === 0) return null;
+        
+        const serviceIds = serviceInstances.map(s => s.id);
+        const salonIds = [...new Set(serviceInstances.map(s => s.salonId).filter(Boolean))];
+        
+        const serviceSalons = salons.filter(s => salonIds.includes(s.id));
+        const serviceMasters = masters.filter(m => 
+            m.providedServices && m.providedServices.some(id => serviceIds.includes(id))
+        );
+        
+        const result = {
+            ...serviceInstances[0],
+            serviceIds,
+            salons: serviceSalons,
+            masters: serviceMasters,
+            allSalonIds: salonIds
+        };
+        
+        cache.serviceDetails.set(cacheKey, result);
+        return result;
+    } catch (error) {
+        console.error('Ошибка загрузки деталей услуги:', error);
+        return null;
+    }
+}
+
+async function getSalonServices(salonId) {
+    if (cache.salonServices.has(salonId)) {
+        return cache.salonServices.get(salonId);
+    }
+    
+    try {
+        const salon = await db.collection('salons').doc(salonId).get();
+        if (!salon.exists) return [];
+        
+        const serviceIds = salon.data().serviceIds || [];
+        if (serviceIds.length === 0) return [];
+        
+        const services = await getCachedData('services');
+        const salonServices = services.filter(s => serviceIds.includes(s.id));
+        
+        cache.salonServices.set(salonId, salonServices);
+        return salonServices;
+    } catch (error) {
+        console.error('Ошибка загрузки услуг салона:', error);
+        return [];
+    }
+}
+
+async function getSalons(filters = {}) {
+    let salons = await getCachedData('salons');
+    
+    if (filters.rating && filters.rating !== 'all') {
+        const minRating = parseFloat(filters.rating);
+        salons = salons.filter(salon => (parseFloat(salon.rating) || 0) >= minRating);
+    }
+    
+    if (filters.specialization && filters.specialization !== 'all') {
+        salons = salons.filter(salon => (salon.specializations || []).includes(filters.specialization));
+    }
+    
+    if (filters.searchTerm) {
+        const searchTermLower = filters.searchTerm.toLowerCase();
+        salons = salons.filter(salon =>
+            (salon.name || '').toLowerCase().includes(searchTermLower) ||
+            (salon.address || '').toLowerCase().includes(searchTermLower)
+        );
+    }
+    
+    return salons;
+}
+
+async function getMasters(filters = {}) {
+    let masters = await getCachedData('masters');
+    
+    if (filters.salonId) {
+        masters = masters.filter(m => m.salonId === filters.salonId);
+    }
+    if (filters.specialization) {
+        masters = masters.filter(m => m.specialization === filters.specialization);
+    }
+    if (filters.userId) {
+        masters = masters.filter(m => m.userId === filters.userId);
+    }
+    
+    return masters;
+}
+
+async function getUsers() {
+    return getCachedData('users');
+}
+
+async function getBookings(filters = {}) {
+    let bookings = await getCachedData('bookings');
+    
+    if (filters.userId) {
+        bookings = bookings.filter(b => b.userId === filters.userId);
+    }
+    if (filters.masterId) {
+        bookings = bookings.filter(b => b.masterId === filters.masterId);
+    }
+    if (filters.status) {
+        bookings = bookings.filter(b => b.status === filters.status);
+    }
+    if (filters.date) {
+        bookings = bookings.filter(b => b.date === filters.date);
+    }
+    
+    return bookings;
+}
+
+async function getReviews(filters = {}) {
+    let reviews = await getCachedData('reviews');
+    
+    if (filters.salonId) {
+        reviews = reviews.filter(r => r.salonId === filters.salonId);
+    }
+    
+    return reviews;
+}
+
+async function getMasterReviews(masterId) {
+    try {
+        const snapshot = await db.collection('master_reviews').where('masterId', '==', masterId).get();
+        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+        console.error('Ошибка загрузки отзывов мастера:', error);
+        return [];
+    }
+}
+
 async function logAction(actionType, objectType, objectId, details = {}, objectName = '') {
     try {
         if (!currentUser || !db) return;
-
-        let finalDetails = { ...details };
-
-        if (!finalDetails.originalData && (actionType === 'update' || actionType === 'delete')) {
-            try {
-                const collectionName = objectType + 's';
-                const docRef = db.collection(collectionName).doc(objectId);
-                const docSnap = await docRef.get();
-                if (docSnap.exists) {
-                    finalDetails.originalData = docSnap.data();
-                } else {
-                    console.warn(`logAction: документ ${collectionName}/${objectId} не найден для получения originalData`);
-                }
-            } catch (error) {
-                console.warn('logAction: ошибка получения оригинальных данных:', error);
-            }
-        }
-
-        if (!finalDetails.originalData && actionType === 'delete') {
-            console.warn(`logAction: для delete не удалось получить originalData (objectId: ${objectId})`);
-        }
-
+        
         const action = {
             userId: currentUser.id,
             userName: currentUser.name || currentUser.email,
@@ -347,333 +590,30 @@ async function logAction(actionType, objectType, objectId, details = {}, objectN
             objectType: objectType,
             objectId: objectId,
             objectName: objectName || objectId,
-            details: finalDetails,
+            details: details,
             timestamp: firebase.firestore.FieldValue.serverTimestamp(),
             status: 'completed'
         };
-
-        const docRef = await db.collection('actions_history').add(action);
-
-        actionsHistory.push({
-            id: docRef.id,
-            ...action,
-            originalData: finalDetails.originalData
-        });
-
-        return docRef.id;
+        
+        await db.collection('actions_history').add(action);
     } catch (error) {
         console.error('Ошибка записи действия:', error);
     }
 }
 
-async function getSalons(filters = {}) {
-    try {
-        const snapshot = await db.collection('salons').get();
-        let allSalons = [];
-        
-        snapshot.forEach(doc => {
-            const salonData = doc.data();
-            if (salonData.rating === undefined) salonData.rating = 0;
-            if (salonData.reviewCount === undefined) salonData.reviewCount = 0;
-            allSalons.push({ id: doc.id, ...salonData });
-        });
-        
-        if (filters.rating && filters.rating !== 'all') {
-            const minRating = parseFloat(filters.rating);
-            allSalons = allSalons.filter(salon => (parseFloat(salon.rating) || 0) >= minRating);
-        }
-        
-        if (filters.specialization && filters.specialization !== 'all') {
-            allSalons = allSalons.filter(salon => (salon.specializations || []).includes(filters.specialization));
-        }
-        
-        if (filters.searchTerm) {
-            const searchTermLower = filters.searchTerm.toLowerCase();
-            allSalons = allSalons.filter(salon =>
-                (salon.name || '').toLowerCase().includes(searchTermLower) ||
-                (salon.address || '').toLowerCase().includes(searchTermLower) ||
-                (salon.description || '').toLowerCase().includes(searchTermLower)
-            );
-        }
-        
-        return allSalons;
-    } catch (error) {
-        console.error('Ошибка загрузки салонов:', error);
-        showNotification('Ошибка загрузки салонов', 'error');
-        return [];
-    }
-}
-
-async function getServices(filters = {}) {
-    try {
-        let query = db.collection('services');
-        
-        if (filters.salonId) query = query.where('salonId', '==', filters.salonId);
-        if (filters.category && filters.category !== 'all') query = query.where('category', '==', filters.category);
-        
-        const snapshot = await query.get();
-        const services = [];
-        
-        snapshot.forEach(doc => services.push({ id: doc.id, ...doc.data() }));
-        
-        return services;
-    } catch (error) {
-        console.error('Ошибка загрузки услуг:', error);
-        return [];
-    }
-}
-
-async function getMasters(filters = {}) {
-    try {
-        let query = db.collection('masters');
-        
-        if (filters.salonId) query = query.where('salonId', '==', filters.salonId);
-        if (filters.specialization) query = query.where('specialization', '==', filters.specialization);
-        if (filters.userId) query = query.where('userId', '==', filters.userId);
-        
-        const snapshot = await query.get();
-        const masters = [];
-        
-        snapshot.forEach(doc => masters.push({ id: doc.id, ...doc.data() }));
-        
-        return masters;
-    } catch (error) {
-        console.error('Ошибка загрузки мастеров:', error);
-        return [];
-    }
-}
-
-async function getUsers() {
-    try {
-        const snapshot = await db.collection('users').get();
-        const users = [];
-        
-        snapshot.forEach(doc => users.push({ id: doc.id, ...doc.data() }));
-        
-        return users;
-    } catch (error) {
-        console.error('Ошибка загрузки пользователей:', error);
-        return [];
-    }
-}
-
-async function getBookings(filters = {}) {
-    try {
-        let query = db.collection('bookings');
-        
-        if (filters.userId) query = query.where('userId', '==', filters.userId);
-        if (filters.masterId) query = query.where('masterId', '==', filters.masterId);
-        if (filters.status) query = query.where('status', '==', filters.status);
-        if (filters.date) query = query.where('date', '==', filters.date);
-        
-        const snapshot = await query.get();
-        const bookings = [];
-        
-        snapshot.forEach(doc => bookings.push({ id: doc.id, ...doc.data() }));
-        
-        return bookings;
-    } catch (error) {
-        console.error('Ошибка загрузки записей:', error);
-        return [];
-    }
-}
-
-async function getReviews(filters = {}) {
-    try {
-        let query = db.collection('reviews');
-        
-        if (filters.salonId) query = query.where('salonId', '==', filters.salonId);
-        
-        const snapshot = await query.get();
-        const reviews = [];
-        
-        snapshot.forEach(doc => reviews.push({ id: doc.id, ...doc.data() }));
-        
-        return reviews;
-    } catch (error) {
-        console.error('Ошибка загрузки отзывов:', error);
-        return [];
-    }
-}
-
-// ==============================================
-// ОТЗЫВЫ О МАСТЕРАХ
-// ==============================================
-
-async function getMasterReviews(masterId) {
-    try {
-        const snapshot = await db.collection('master_reviews').where('masterId', '==', masterId).get();
-        const reviews = [];
-        snapshot.forEach(doc => reviews.push({ id: doc.id, ...doc.data() }));
-        return reviews;
-    } catch (error) {
-        console.error('Ошибка загрузки отзывов мастера:', error);
-        return [];
-    }
-}
-
-async function updateMasterRating(masterId) {
-    try {
-        const reviews = await getMasterReviews(masterId);
-        const rating = reviews.length 
-            ? Math.round((reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length) * 10) / 10 
-            : 0;
-        await db.collection('masters').doc(masterId).update({
-            rating: rating,
-            reviewCount: reviews.length
-        });
-        return rating;
-    } catch (error) {
-        console.error('Ошибка обновления рейтинга мастера:', error);
-        return 0;
-    }
-}
-
-async function loadMasterReviews(masterId) {
-    const container = document.getElementById('master-reviews-list');
-    if (!container) return;
-
-    const reviews = await getMasterReviews(masterId);
-    if (reviews.length === 0) {
-        container.innerHTML = `<div style="text-align: center; padding: 40px 20px; color: var(--text-light);">
-            <i class="far fa-comment" style="font-size: 48px; margin-bottom: 20px;"></i>
-            <p>Отзывов о мастере пока нет. Будьте первым!</p>
-        </div>`;
-        return;
-    }
-
-    container.innerHTML = '';
-    reviews.forEach(review => {
-        const reviewItem = document.createElement('div');
-        reviewItem.className = 'review-item';
-        const avatarUrl = review.authorImage || getSafeImageUrl('avatar', review.authorName);
-        reviewItem.innerHTML = `
-            <div class="review-header">
-                <img src="${avatarUrl}" alt="${review.authorName}" class="review-author-img">
-                <div>
-                    <div class="review-author">${review.authorName}</div>
-                    <div class="review-date">${formatDate(review.date)}</div>
-                </div>
-            </div>
-            <div class="review-rating-stars">${renderStars(review.rating)}</div>
-            ${review.text ? `<div class="review-text">${review.text}</div>` : ''}
-        `;
-        container.appendChild(reviewItem);
-    });
-}
-
-async function submitMasterReview() {
-    if (!currentUser) {
-        showNotification('Только авторизованные пользователи могут оставлять отзывы', 'error');
-        showModal('profile-modal');
-        return;
-    }
-    if (!selectedMaster) {
-        showNotification('Мастер не выбран', 'error');
-        return;
-    }
-
-    const text = document.getElementById('master-review-text')?.value.trim() || '';
-    const rating = selectedMasterRating;
-
-    if (rating === 0) {
-        showNotification('Пожалуйста, оцените мастера', 'error');
-        return;
-    }
-
-    try {
-        const existing = await db.collection('master_reviews')
-            .where('masterId', '==', selectedMaster.id)
-            .where('authorId', '==', currentUser.id)
-            .get();
-        if (!existing.empty) {
-            showNotification('Вы уже оставляли отзыв этому мастеру', 'warning');
-            return;
-        }
-
-        const reviewData = {
-            authorId: currentUser.id,
-            authorName: currentUser.name || currentUser.email.split('@')[0],
-            authorImage: getSafeImageUrl('avatar', currentUser.name),
-            text: text,
-            rating: rating,
-            masterId: selectedMaster.id,
-            masterName: selectedMaster.name,
-            date: firebase.firestore.FieldValue.serverTimestamp()
-        };
-
-        await db.collection('master_reviews').add(reviewData);
-        await updateMasterRating(selectedMaster.id);
-
-        document.getElementById('master-review-text').value = '';
-        selectedMasterRating = 0;
-        updateMasterRatingDisplay();
-
-        showNotification('Отзыв успешно опубликован');
-        loadMasterReviews(selectedMaster.id);
-    } catch (error) {
-        console.error('Ошибка отправки отзыва:', error);
-        showNotification('Ошибка при публикации отзыва', 'error');
-    }
-}
-
-function updateMasterRatingDisplay() {
-    const stars = document.querySelectorAll('#master-review-stars i');
-    const ratingText = document.getElementById('master-selected-rating-text');
-    if (!stars.length || !ratingText) return;
-    stars.forEach((star, index) => {
-        star.className = index < selectedMasterRating ? 'fas fa-star active' : 'far fa-star';
-    });
-    ratingText.textContent = selectedMasterRating > 0 ? 
-        `${selectedMasterRating} звезд${selectedMasterRating === 1 ? 'а' : selectedMasterRating < 5 ? 'ы' : ''}` : 
-        '0 звёзд';
-}
-
-// ==============================================
-// ДАЛЕЕ ИДУТ ВСЕ ОСТАЛЬНЫЕ ФУНКЦИИ (без изменений, кроме блока с поиском)
-// ==============================================
-
 async function getActionsHistory(filters = {}) {
     try {
-        let query = db.collection('actions_history').orderBy('timestamp', 'desc');
+        let query = db.collection('actions_history').orderBy('timestamp', 'desc').limit(100);
         
         if (filters.userId) query = query.where('userId', '==', filters.userId);
         if (filters.userType && filters.userType !== 'all') query = query.where('userRole', '==', filters.userType);
         if (filters.actionType && filters.actionType !== 'all') query = query.where('actionType', '==', filters.actionType);
         
-        const snapshot = await query.limit(100).get();
-        const actions = [];
-        
-        snapshot.forEach(doc => actions.push({ id: doc.id, ...doc.data() }));
-        
-        return actions;
+        const snapshot = await query.get();
+        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     } catch (error) {
-        console.error('Ошибка загрузки истории действий:', error);
+        console.error('Ошибка загрузки истории:', error);
         return [];
-    }
-}
-
-async function initializeSalonRatings() {
-    try {
-        const salons = await getSalons();
-        const updatePromises = [];
-        
-        for (const salon of salons) {
-            const reviews = await getReviews({ salonId: salon.id });
-            
-            if (reviews.length === 0 && salon.rating !== 0) {
-                updatePromises.push(
-                    db.collection('salons').doc(salon.id).update({ rating: 0, reviewCount: 0 })
-                );
-            }
-        }
-        
-        if (updatePromises.length > 0) {
-            await Promise.all(updatePromises);
-            console.log('Рейтинги салонов инициализированы');
-        }
-    } catch (error) {
-        console.error('Ошибка инициализации рейтингов:', error);
     }
 }
 
@@ -683,33 +623,27 @@ async function initializeSalonRatings() {
 async function login() {
     const email = document.getElementById('login-email').value.trim();
     const password = document.getElementById('login-password').value.trim();
-    
+
     if (!email || !password) {
         showNotification('Пожалуйста, заполните все поля', 'error');
         return;
     }
-    
+
     try {
         const userCredential = await auth.signInWithEmailAndPassword(email, password);
         const user = userCredential.user;
-        
+
         const userDoc = await db.collection('users').doc(user.uid).get();
         if (userDoc.exists) {
             currentUser = { id: user.uid, email: user.email, ...userDoc.data() };
             localStorage.setItem('beautyBookingUser', JSON.stringify(currentUser));
-            
+
             updateProfileButton();
-            setupUserNavigation();
-            
+            hideModal('profile-modal');
             document.getElementById('login-email').value = '';
             document.getElementById('login-password').value = '';
-            
-            hideModal('profile-modal');
             showNotification('Вы успешно вошли в систему');
-            
-            const searchInput = document.getElementById('global-search');
-            if (searchInput) searchInput.value = '';
-            
+
             const activePage = document.querySelector('.page.active').id;
             showPage(activePage);
         } else {
@@ -718,13 +652,7 @@ async function login() {
         }
     } catch (error) {
         console.error('Ошибка входа:', error);
-        if (error.code === 'auth/user-not-found') {
-            showNotification('Пользователь не найден', 'error');
-        } else if (error.code === 'auth/wrong-password') {
-            showNotification('Неверный пароль', 'error');
-        } else {
-            showNotification('Ошибка входа. Попробуйте еще раз.', 'error');
-        }
+        showNotification('Ошибка входа. Проверьте email и пароль.', 'error');
     }
 }
 
@@ -735,63 +663,58 @@ async function register() {
     const name = document.getElementById('register-name').value.trim();
     const lastname = document.getElementById('register-lastname').value.trim();
     const phone = document.getElementById('register-phone').value.trim();
-    const role = document.getElementById('register-role').value;
-    
+
     if (!email || !password || !passwordConfirm || !name) {
         showNotification('Пожалуйста, заполните обязательные поля', 'error');
         return;
     }
-    
+
     if (password.length < 6) {
         showNotification('Пароль должен содержать минимум 6 символов', 'error');
         return;
     }
-    
+
     if (password !== passwordConfirm) {
         showNotification('Пароли не совпадают', 'error');
         return;
     }
-    
+
     try {
         const userCredential = await auth.createUserWithEmailAndPassword(email, password);
         const user = userCredential.user;
-        
+
         const userData = {
             email: email,
             name: name,
             lastname: lastname || '',
             phone: phone || '',
-            role: role,
+            role: 'client',
             registrationDate: firebase.firestore.FieldValue.serverTimestamp(),
             bookings: []
         };
-        
+
         await db.collection('users').doc(user.uid).set(userData);
-        
+
         currentUser = { id: user.uid, ...userData };
         localStorage.setItem('beautyBookingUser', JSON.stringify(currentUser));
-        
+
         await logAction('create', 'user', user.uid, {}, `${name} ${lastname}`);
-        
+
         updateProfileButton();
-        setupUserNavigation();
-        
+        hideModal('profile-modal');
         document.getElementById('register-email').value = '';
         document.getElementById('register-password').value = '';
         document.getElementById('register-password-confirm').value = '';
         document.getElementById('register-name').value = '';
         document.getElementById('register-lastname').value = '';
         document.getElementById('register-phone').value = '';
-        document.getElementById('register-role').value = 'client';
-        
-        hideModal('profile-modal');
         showNotification('Регистрация прошла успешно!');
     } catch (error) {
         console.error('Ошибка регистрации:', error);
         if (error.code === 'auth/email-already-in-use') {
             showNotification('Пользователь с таким email уже зарегистрирован', 'error');
         } else {
-            showNotification('Ошибка регистрации. Попробуйте позже.', 'error');
+            showNotification('Ошибка регистрации', 'error');
         }
     }
 }
@@ -799,26 +722,21 @@ async function register() {
 function updateProfileButton() {
     const profileBtn = document.getElementById('profile-modal-btn');
     const logoutBtn = document.getElementById('logout-btn');
-    
+
     if (currentUser) {
         const displayName = currentUser.name || currentUser.email.split('@')[0];
-        
         if (profileBtn) {
             profileBtn.innerHTML = `<i class="fas fa-user"></i><span>${displayName}</span>`;
             profileBtn.style.display = 'none';
         }
-        
         if (logoutBtn) logoutBtn.style.display = 'flex';
-        
         setupUserNavigation();
     } else {
         if (profileBtn) {
             profileBtn.innerHTML = '<i class="fas fa-user"></i><span>Войти</span>';
             profileBtn.style.display = 'flex';
         }
-        
         if (logoutBtn) logoutBtn.style.display = 'none';
-        
         setupGuestNavigation();
     }
 }
@@ -828,11 +746,11 @@ function setupUserNavigation() {
     const adminNavItem = document.getElementById('admin-nav-item');
     const masterNavItem = document.getElementById('master-nav-item');
     const masterWorkSchedule = document.getElementById('master-work-schedule');
-    
-    if (profileNavItem) profileNavItem.style.display = (currentUser.role === 'client') ? 'block' : 'none';
-    if (adminNavItem) adminNavItem.style.display = (currentUser.role === 'admin') ? 'block' : 'none';
-    if (masterNavItem) masterNavItem.style.display = (currentUser.role === 'master') ? 'block' : 'none';
-    if (masterWorkSchedule) masterWorkSchedule.style.display = (currentUser.role === 'master') ? 'block' : 'none';
+
+    if (profileNavItem) profileNavItem.style.display = (currentUser?.role === 'client') ? 'block' : 'none';
+    if (adminNavItem) adminNavItem.style.display = (currentUser?.role === 'admin') ? 'block' : 'none';
+    if (masterNavItem) masterNavItem.style.display = (currentUser?.role === 'master') ? 'block' : 'none';
+    if (masterWorkSchedule) masterWorkSchedule.style.display = (currentUser?.role === 'master') ? 'block' : 'none';
 }
 
 function setupGuestNavigation() {
@@ -840,7 +758,7 @@ function setupGuestNavigation() {
     const adminNavItem = document.getElementById('admin-nav-item');
     const masterNavItem = document.getElementById('master-nav-item');
     const masterWorkSchedule = document.getElementById('master-work-schedule');
-    
+
     if (profileNavItem) profileNavItem.style.display = 'block';
     if (adminNavItem) adminNavItem.style.display = 'none';
     if (masterNavItem) masterNavItem.style.display = 'none';
@@ -852,42 +770,168 @@ async function logout() {
         await auth.signOut();
         currentUser = null;
         localStorage.removeItem('beautyBookingUser');
-        
+
         updateProfileButton();
         showNotification('Вы успешно вышли из системы');
-        
-        const searchInput = document.getElementById('global-search');
-        if (searchInput) searchInput.value = '';
-        
+
         if (document.getElementById('admin-page').classList.contains('active') ||
             document.getElementById('profile-page').classList.contains('active') ||
             document.getElementById('master-schedule-page').classList.contains('active')) {
             showPage('home-page');
         }
-        
-        document.getElementById('login-email').value = '';
-        document.getElementById('login-password').value = '';
     } catch (error) {
         console.error('Ошибка выхода:', error);
     }
 }
 
 // ==============================================
-// ЗАГРУЗКА САЛОНОВ С ФИЛЬТРАМИ И ПОИСКОМ (live‑поиск)
+// ЗАГРУЗКА ГЛАВНОЙ СТРАНИЦЫ
 // ==============================================
+async function loadHomePage() {
+    const container = document.getElementById('salons-container');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+    
+    try {
+        const salons = await getCachedData('salons');
+        const reviews = await getCachedData('reviews');
+        
+        const recommended = [...salons].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 3);
+        const recContainer = document.getElementById('recommendations-container');
+        if (recContainer) {
+            recContainer.innerHTML = '';
+            recommended.forEach(salon => recContainer.appendChild(createSalonCard(salon)));
+        }
+        
+        container.innerHTML = '';
+        if (salons.length === 0) {
+            container.innerHTML = '<p class="no-results">Салоны не найдены</p>';
+        } else {
+            salons.forEach(salon => container.appendChild(createSalonCard(salon)));
+        }
+        
+        loadReviews(reviews.slice(0, 3));
+    } catch (error) {
+        console.error('Ошибка загрузки данных:', error);
+        container.innerHTML = '<p class="no-results">Ошибка загрузки данных</p>';
+    }
+}
+
+async function loadAllSalons() {
+    const container = document.getElementById('all-salons-container');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+    
+    try {
+        const salons = await getCachedData('salons');
+        container.innerHTML = '';
+        if (salons.length === 0) {
+            container.innerHTML = '<p class="no-results">Салоны не найдены</p>';
+        } else {
+            salons.forEach(salon => container.appendChild(createSalonCard(salon)));
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки салонов:', error);
+        container.innerHTML = '<p class="no-results">Ошибка загрузки</p>';
+    }
+}
+
+async function loadAllServices() {
+    const container = document.getElementById('all-services-container');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+    
+    try {
+        const uniqueServices = await getUniqueServices();
+        container.innerHTML = '';
+        if (uniqueServices.length === 0) {
+            container.innerHTML = '<p class="no-results">Услуги не найдены</p>';
+        } else {
+            uniqueServices.forEach(service => {
+                container.appendChild(createServiceCard(service, true));
+            });
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки услуг:', error);
+        container.innerHTML = '<p class="no-results">Ошибка загрузки</p>';
+    }
+}
+
+async function loadAllMasters() {
+    const container = document.getElementById('all-masters-container');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+    
+    try {
+        const masters = await getCachedData('masters');
+        const salons = await getCachedData('salons');
+        const salonMap = Object.fromEntries(salons.map(s => [s.id, s.name]));
+        
+        container.innerHTML = '';
+        if (masters.length === 0) {
+            container.innerHTML = '<p class="no-results">Мастера не найдены</p>';
+        } else {
+            masters.forEach(master => {
+                master.salonName = salonMap[master.salonId] || 'Неизвестный салон';
+                container.appendChild(createMasterCard(master));
+            });
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки мастеров:', error);
+        container.innerHTML = '<p class="no-results">Ошибка загрузки</p>';
+    }
+}
+
+async function loadReviews(reviews) {
+    const container = document.getElementById('reviews-list');
+    if (!container) return;
+
+    if (!reviews || reviews.length === 0) {
+        container.innerHTML = '<p class="no-results">Отзывов пока нет</p>';
+        return;
+    }
+
+    container.innerHTML = '';
+    
+    const salons = await getCachedData('salons');
+    const salonMap = Object.fromEntries(salons.map(s => [s.id, s.name]));
+
+    reviews.forEach(review => {
+        const reviewItem = document.createElement('div');
+        reviewItem.className = 'review-item';
+        
+        reviewItem.innerHTML = `
+            <div class="review-header">
+                <img src="${review.authorImage || getSafeImageUrl('avatar', review.authorName)}" alt="${review.authorName}" class="review-author-img">
+                <div>
+                    <div class="review-author">${review.authorName || 'Аноним'}</div>
+                    <div class="review-date">${formatDate(review.date)}</div>
+                </div>
+            </div>
+            <div class="review-rating-stars">${renderStars(review.rating || 0)}</div>
+            <p style="color: var(--text-light); margin-bottom: 10px;"><i class="fas fa-store"></i> ${salonMap[review.salonId] || 'Неизвестный салон'}</p>
+            ${review.text ? `<div class="review-text">${review.text}</div>` : ''}
+        `;
+        
+        container.appendChild(reviewItem);
+    });
+}
 
 async function loadSalonsWithFilters() {
     const container = document.getElementById('salons-container');
     const searchInput = document.getElementById('global-search');
-    
     const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
     
     if (!container) return;
     
-    container.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Загрузка...</div>';
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
     
-    const ratingFilter = document.getElementById('filter-rating') ? document.getElementById('filter-rating').value : 'all';
-    const specializationFilter = document.getElementById('filter-specialization') ? document.getElementById('filter-specialization').value : 'all';
+    const ratingFilter = document.getElementById('filter-rating')?.value || 'all';
+    const specializationFilter = document.getElementById('filter-specialization')?.value || 'all';
     
     const filters = {};
     if (ratingFilter !== 'all') filters.rating = ratingFilter;
@@ -911,8 +955,6 @@ async function loadSalonsWithFilters() {
         
         const sectionTitle = document.querySelector('.main-salons-section .section-title');
         if (sectionTitle) sectionTitle.textContent = 'Все салоны';
-        
-        loadRecommendations();
     }
     
     if (salons.length === 0) {
@@ -924,49 +966,39 @@ async function loadSalonsWithFilters() {
     salons.forEach(salon => container.appendChild(createSalonCard(salon)));
 }
 
+async function performSearch() {
+    loadSalonsWithFilters();
+}
+
+async function applyFilters() {
+    loadSalonsWithFilters();
+}
+
+// ==============================================
+// СОЗДАНИЕ КАРТОЧЕК
+// ==============================================
 function createSalonCard(salon) {
-    const salonCard = document.createElement('div');
-    salonCard.className = 'salon-card';
-    salonCard.setAttribute('data-salon-id', salon.id);
-    
-    let specializationIcon = 'fa-spa';
-    if (salon.specializations && salon.specializations.includes('hair')) specializationIcon = 'fa-cut';
-    if (salon.specializations && salon.specializations.includes('nails')) specializationIcon = 'fa-hand-sparkles';
-    if (salon.specializations && salon.specializations.includes('barber')) specializationIcon = 'fa-male';
+    const card = document.createElement('div');
+    card.className = 'salon-card';
+    card.dataset.salonId = salon.id;
     
     const imageUrl = salon.imageUrl || getSafeImageUrl('salon', salon.name);
-    const salonRating = salon.rating !== undefined ? parseFloat(salon.rating) : 0;
-    const reviewCount = salon.reviewCount !== undefined ? parseInt(salon.reviewCount) : 0;
+    const rating = salon.rating || 0;
     
-    salonCard.innerHTML = `
-        <img src="${imageUrl}" alt="${salon.name}" class="salon-img">
+    card.innerHTML = `
+        <img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy">
         <div class="salon-info">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
-                <h3 class="salon-name">${salon.name}</h3>
-                <i class="fas ${specializationIcon}" style="color: var(--primary-color); font-size: 20px;"></i>
-            </div>
+            <h3 class="salon-name">${salon.name}</h3>
             <p class="salon-address"><i class="fas fa-map-marker-alt"></i> ${salon.address || 'Адрес не указан'}</p>
             <div class="salon-rating">
-                ${renderStars(salonRating)}
-                <span class="rating-value">${salonRating.toFixed(1)}</span>
-                <span class="rating-count">(${reviewCount})</span>
-            </div>
-            <div class="salon-tags">
-                ${(salon.specializations || []).map(spec => {
-                    const specNames = { 
-                        'hair': 'Парикмахерская', 
-                        'nails': 'Ногтевой сервис', 
-                        'cosmetology': 'Косметология', 
-                        'massage': 'Массаж', 
-                        'barber': 'Барбершоп' 
-                    };
-                    return `<span class="salon-tag">${specNames[spec] || spec}</span>`;
-                }).join('')}
+                ${renderStars(rating)}
+                <span class="rating-value">${rating.toFixed(1)}</span>
+                <span class="rating-count">(${salon.reviewCount || 0})</span>
             </div>
             <div class="salon-price">Средний чек: ${salon.averagePrice || 2500} ₽</div>
             ${currentUser && currentUser.role === 'client' ? `
             <div class="salon-actions">
-                <button class="btn btn-primary" onclick="startBookingForSalon('${salon.id}')">
+                <button class="btn btn-primary book-salon-btn" data-salon-id="${salon.id}">
                     <i class="fas fa-calendar-check"></i> Записаться
                 </button>
             </div>
@@ -974,720 +1006,1878 @@ function createSalonCard(salon) {
         </div>
     `;
     
-    salonCard.addEventListener('click', function(e) {
+    card.addEventListener('click', function(e) {
         if (!e.target.closest('button')) {
             loadSalonPage(salon.id);
-            showPage('salon-page');
         }
     });
     
-    return salonCard;
+    const bookBtn = card.querySelector('.book-salon-btn');
+    if (bookBtn) {
+        bookBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startBookingForSalon(salon.id);
+        });
+    }
+    
+    return card;
 }
 
-function createMasterCard(master, salonName = '') {
-    const masterCard = document.createElement('div');
-    masterCard.className = 'master-card';
-    masterCard.setAttribute('data-master-id', master.id);
+function createServiceCard(service, compact = false) {
+    const card = document.createElement('div');
+    card.className = 'service-card';
+    card.dataset.serviceName = service.name;
+    
+    const imageUrl = service.imageUrl || getSafeImageUrl('service', service.name);
+    
+    if (compact) {
+        card.innerHTML = `
+            <img src="${imageUrl}" alt="${service.name}" class="service-img" loading="lazy">
+            <div class="service-info">
+                <h3 class="service-name">${service.name}</h3>
+                <p class="service-category">${getCategoryName(service.category)}</p>
+                <p class="service-price">${service.price} ₽</p>
+            </div>
+        `;
+    } else {
+        card.innerHTML = `
+            <img src="${imageUrl}" alt="${service.name}" class="service-img" loading="lazy">
+            <div class="service-info">
+                <h3 class="service-name">${service.name}</h3>
+                <p class="service-category">${getCategoryName(service.category)}</p>
+                <p class="service-price">${service.price} ₽</p>
+                <p class="service-duration">Длительность: ${service.duration || 60} мин</p>
+            </div>
+        `;
+    }
+    
+    card.addEventListener('click', () => showServicePage(service.name));
+    return card;
+}
+
+function createMasterCard(master) {
+    const card = document.createElement('div');
+    card.className = 'master-card';
+    card.dataset.masterId = master.id;
     
     const imageUrl = master.imageUrl || getSafeImageUrl('master', master.name);
     
-    masterCard.innerHTML = `
-        <img src="${imageUrl}" alt="${master.name}" class="master-img">
+    card.innerHTML = `
+        <img src="${imageUrl}" alt="${master.name}" class="master-img" loading="lazy">
         <div class="master-info">
             <h3 class="master-name">${master.name}</h3>
             <p class="master-specialization">${master.specialization || 'Не указано'}</p>
-            <div class="salon-rating" style="margin: 10px 0;">
+            <div class="salon-rating">
                 ${renderStars(master.rating || 0)}
-                <span class="rating-value">${(master.rating || 0).toFixed(1)}</span>
+                <span class="rating-value">${(parseFloat(master.rating) || 0).toFixed(1)}</span>
             </div>
             <p style="color: var(--text-light); font-size: 14px; margin-bottom: 10px;">
-                <i class="fas fa-store"></i> ${salonName || 'Неизвестный салон'}
+                <i class="fas fa-store"></i> ${master.salonName || 'Неизвестный салон'}
             </p>
             <p class="master-price">${master.price || 0} ₽</p>
             ${currentUser && currentUser.role === 'client' ? `
-            <button class="btn btn-primary" onclick="startBookingForMaster('${master.id}')">
+            <button class="btn btn-primary book-master-btn" data-master-id="${master.id}">
                 <i class="fas fa-calendar-check"></i> Записаться
             </button>
             ` : ''}
         </div>
     `;
     
-    masterCard.addEventListener('click', function(e) {
+    card.addEventListener('click', function(e) {
         if (!e.target.closest('button')) {
             loadMasterPage(master.id);
-            showPage('master-page');
         }
     });
     
-    return masterCard;
-}
-
-function createServiceCard(service, salonName = '') {
-    const serviceCard = document.createElement('div');
-    serviceCard.className = 'service-card';
-    serviceCard.setAttribute('data-service-id', service.id);
-    
-    const imageUrl = service.imageUrl || getSafeImageUrl('service', service.name);
-    
-    serviceCard.innerHTML = `
-        <img src="${imageUrl}" alt="${service.name}" class="service-img">
-        <div class="service-info">
-            <h3 class="service-name">${service.name}</h3>
-            <p class="service-category">${getCategoryName(service.category)}</p>
-            <p style="color: var(--text-light); font-size: 14px; margin-bottom: 10px;">
-                <i class="fas fa-store"></i> ${salonName || 'Неизвестный салон'}
-            </p>
-            <p class="service-price">${service.price || 0} ₽</p>
-            ${currentUser && currentUser.role === 'client' ? `
-            <button class="btn btn-primary" onclick="startBookingForService('${service.id}')">
-                <i class="fas fa-calendar-check"></i> Записаться
-            </button>
-            ` : ''}
-        </div>
-    `;
-    
-    serviceCard.addEventListener('click', function(e) {
-        if (!e.target.closest('button')) {
-            loadServicePage(service.id);
-            showPage('service-page');
-        }
-    });
-    
-    return serviceCard;
-}
-
-function createUniqueServiceCard(service) {
-    const serviceCard = document.createElement('div');
-    serviceCard.className = 'service-card';
-    serviceCard.setAttribute('data-service-name', service.name);
-    
-    const imageUrl = service.imageUrl || getSafeImageUrl('service', service.name);
-    const salonCount = service.salons.length;
-    
-    serviceCard.innerHTML = `
-        <img src="${imageUrl}" alt="${service.name}" class="service-img">
-        <div class="service-info">
-            <h3 class="service-name">${service.name}</h3>
-            <p class="service-category">${getCategoryName(service.category)}</p>
-            <p style="color: var(--text-light); font-size: 14px;">
-                <i class="fas fa-store"></i> Доступно в ${salonCount} салон${salonCount === 1 ? 'е' : salonCount < 5 ? 'ах' : 'ах'}
-            </p>
-            <p class="service-price">от ${service.price || 0} ₽</p>
-        </div>
-    `;
-    
-    serviceCard.addEventListener('click', function(e) {
-        if (!e.target.closest('button')) {
-            loadUniqueServicePage(service);
-            showPage('service-page');
-        }
-    });
-    
-    return serviceCard;
-}
-
-async function loadUniqueServicePage(service) {
-    selectedService = service;
-    
-    document.getElementById('service-page-name').textContent = service.name;
-    document.getElementById('service-page-category').textContent = getCategoryName(service.category);
-    document.getElementById('service-main-image').src = service.imageUrl || getSafeImageUrl('service', service.name);
-    document.getElementById('service-page-price').textContent = `от ${service.price || 0} ₽`;
-    document.getElementById('service-page-duration').textContent = `Длительность: ${service.duration || 60} минут`;
-    
-    document.getElementById('service-page-description').innerHTML = `
-        <p>Профессиональная услуга. Доступна в нескольких салонах. Выберите салон для записи.</p>
-    `;
-    
-    const serviceActions = document.getElementById('service-actions');
-    serviceActions.innerHTML = '';
-    if (currentUser && currentUser.role === 'client') {
-        serviceActions.innerHTML = `
-            <button class="btn btn-primary" onclick="showNotification('Выберите салон из списка ниже', 'info')">
-                <i class="fas fa-calendar-check"></i> Записаться
-            </button>
-        `;
-    }
-    
-    const salonsContainer = document.getElementById('service-salons-container');
-    if (!salonsContainer) return;
-    
-    salonsContainer.innerHTML = '';
-    if (service.salons.length === 0) {
-        salonsContainer.innerHTML = '<p class="no-results">Салоны не найдены</p>';
-        return;
-    }
-    
-    service.salons.forEach(salon => {
-        const card = createSalonCard(salon);
-        card.addEventListener('click', function(e) {
-            if (!e.target.closest('button')) {
-                startBookingForSalon(salon.id);
-            }
+    const bookBtn = card.querySelector('.book-master-btn');
+    if (bookBtn) {
+        bookBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startBookingForMaster(master.id);
         });
-        salonsContainer.appendChild(card);
-    });
-    
-    await loadServiceMastersForUniqueService(service);
-}
-
-async function loadServiceMastersForUniqueService(service) {
-    const container = document.getElementById('service-masters-container');
-    if (!container) return;
-    
-    const salonIds = service.salons.map(s => s.id);
-    if (salonIds.length === 0) {
-        container.innerHTML = '<p class="no-results">Мастера не найдены</p>';
-        return;
     }
     
-    const masters = [];
-    for (const salonId of salonIds) {
-        const salonMasters = await getMasters({ salonId });
-        masters.push(...salonMasters);
-    }
-    
-    const category = service.category;
-    const filteredMasters = masters.filter(master => {
-        const masterCategory = getCategoryFromSpecialization(master.specialization);
-        return masterCategory === category;
-    });
-    
-    if (filteredMasters.length === 0) {
-        container.innerHTML = '<p class="no-results">Мастера не найдены</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    filteredMasters.forEach(master => {
-        const masterCard = createMasterCard(master, master.salonName);
-        masterCard.addEventListener('click', function(e) {
-            if (!e.target.closest('button')) {
-                loadMasterPage(master.id);
-                showPage('master-page');
-            }
-        });
-        container.appendChild(masterCard);
-    });
-}
-
-async function loadAllSalons() {
-    const container = document.getElementById('all-salons-container');
-    if (!container) return;
-    
-    container.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Загрузка...</div>';
-    
-    const salons = await getSalons();
-    
-    if (salons.length === 0) {
-        container.innerHTML = '<p class="no-results">Салоны не найдены</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    salons.forEach(salon => container.appendChild(createSalonCard(salon)));
-}
-
-async function loadAllServices() {
-    const container = document.getElementById('all-services-container');
-    if (!container) return;
-    
-    container.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Загрузка...</div>';
-    
-    const services = await getServices();
-    const salons = await getSalons();
-    const salonMap = {};
-    salons.forEach(salon => salonMap[salon.id] = salon);
-    
-    const servicesMap = new Map();
-    services.forEach(service => {
-        const key = service.name.toLowerCase().trim();
-        if (!servicesMap.has(key)) {
-            servicesMap.set(key, {
-                ...service,
-                salons: []
-            });
-        }
-        if (service.salonId && salonMap[service.salonId]) {
-            servicesMap.get(key).salons.push(salonMap[service.salonId]);
-        }
-    });
-    
-    const uniqueServices = Array.from(servicesMap.values());
-    
-    if (uniqueServices.length === 0) {
-        container.innerHTML = '<p class="no-results">Услуги не найдены</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    uniqueServices.forEach(service => {
-        const card = createUniqueServiceCard(service);
-        container.appendChild(card);
-    });
-}
-
-async function loadAllMasters() {
-    const container = document.getElementById('all-masters-container');
-    if (!container) return;
-    
-    container.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Загрузка...</div>';
-    
-    const masters = await getMasters();
-    const salons = await getSalons();
-    const salonMap = {};
-    salons.forEach(salon => salonMap[salon.id] = salon.name);
-    
-    if (masters.length === 0) {
-        container.innerHTML = '<p class="no-results">Мастера не найдены</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    masters.forEach(master => {
-        const salonName = salonMap[master.salonId] || 'Неизвестный салон';
-        container.appendChild(createMasterCard(master, salonName));
-    });
-}
-
-async function loadRecommendations() {
-    const container = document.getElementById('recommendations-container');
-    if (!container) return;
-    
-    const searchInput = document.getElementById('global-search');
-    const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
-    
-    if (searchTerm) {
-        container.innerHTML = '';
-        return;
-    }
-    
-    const salons = await getSalons();
-    let recommendedSalons = [...salons].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 3);
-    
-    if (recommendedSalons.length === 0) {
-        container.innerHTML = '<p class="no-results">Нет рекомендаций</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    recommendedSalons.forEach(salon => container.appendChild(createSalonCard(salon)));
-}
-
-async function loadReviews() {
-    const container = document.getElementById('reviews-list');
-    if (!container) return;
-    
-    const reviews = await getReviews();
-    const recentReviews = reviews.slice(0, 3);
-    
-    if (recentReviews.length === 0) {
-        container.innerHTML = '<p class="no-results">Отзывов пока нет</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    
-    for (const review of recentReviews) {
-        let salonName = 'Неизвестный салон';
-        
-        if (review.salonId) {
-            try {
-                const salonDoc = await db.collection('salons').doc(review.salonId).get();
-                if (salonDoc.exists) salonName = salonDoc.data().name;
-            } catch (error) {
-                console.error('Ошибка загрузки салона для отзыва:', error);
-            }
-        }
-        
-        const reviewItem = document.createElement('div');
-        reviewItem.className = 'review-item';
-        
-        const avatarUrl = review.authorImage || getSafeImageUrl('avatar', review.authorName);
-        
-        reviewItem.innerHTML = `
-            <div class="review-header">
-                <img src="${avatarUrl}" alt="${review.authorName}" class="review-author-img">
-                <div>
-                    <div class="review-author">${review.authorName || 'Анонимный пользователь'}</div>
-                    <div class="review-date">${formatDate(review.date)}</div>
-                </div>
-            </div>
-            <div class="review-rating-stars">${renderStars(review.rating || 0)}</div>
-            <p style="color: var(--text-light); margin-bottom: 10px;"><i class="fas fa-store"></i> ${salonName}</p>
-            ${review.text ? `<div class="review-text">${review.text}</div>` : ''}
-        `;
-        
-        container.appendChild(reviewItem);
-    }
+    return card;
 }
 
 // ==============================================
-// СТРАНИЦА САЛОНА
+// СТРАНИЦА САЛОНА (ИСПРАВЛЕНО)
 // ==============================================
 async function loadSalonPage(salonId) {
+    showPage('salon-page');
+    
+    const nameEl = document.getElementById('salon-page-name');
+    const addressEl = document.getElementById('salon-address-text');
+    const descEl = document.getElementById('salon-page-description');
+    const imageEl = document.getElementById('salon-main-image');
+    const ratingEl = document.getElementById('salon-rating');
+    const tagsEl = document.getElementById('salon-tags');
+    const servicesEl = document.getElementById('services-container');
+    const mastersEl = document.getElementById('masters-container');
+    const reviewsEl = document.getElementById('salon-reviews-list');
+    const actionsEl = document.getElementById('salon-actions');
+    
+    servicesEl.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка услуг...</div>';
+    mastersEl.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка мастеров...</div>';
+    reviewsEl.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка отзывов...</div>';
+    
     try {
         const salonDoc = await db.collection('salons').doc(salonId).get();
         if (!salonDoc.exists) {
             showNotification('Салон не найден', 'error');
+            showPage('salons-page');
             return;
         }
         
-        currentSalon = { id: salonDoc.id, ...salonDoc.data() };
+        const salon = { id: salonDoc.id, ...salonDoc.data() };
+        currentSalon = salon;
         
-        document.getElementById('salon-page-name').textContent = currentSalon.name;
-        document.getElementById('salon-address-text').textContent = currentSalon.address || 'Адрес не указан';
-        document.getElementById('salon-page-description').textContent = currentSalon.description || 'Премиальный салон красоты с опытными мастерами и современным оборудованием.';
-        document.getElementById('salon-main-image').src = currentSalon.imageUrl || getSafeImageUrl('salon', currentSalon.name);
+        nameEl.textContent = salon.name;
+        addressEl.textContent = salon.address || 'Адрес не указан';
+        descEl.textContent = salon.description || 'Премиальный салон красоты';
+        imageEl.src = salon.imageUrl || getSafeImageUrl('salon', salon.name);
+        ratingEl.textContent = (salon.rating || 0).toFixed(1);
         
-        const salonRating = currentSalon.rating !== undefined ? currentSalon.rating : 0;
-        document.getElementById('salon-rating').textContent = salonRating.toFixed(1);
-        
-        const tagsContainer = document.getElementById('salon-tags');
-        tagsContainer.innerHTML = '';
-        
-        (currentSalon.specializations || []).forEach(spec => {
-            const specNames = { 
-                'hair': 'Парикмахерская', 
-                'nails': 'Ногтевой сервис', 
-                'cosmetology': 'Косметология', 
-                'massage': 'Массаж', 
-                'barber': 'Барбершоп' 
-            };
-            
+        tagsEl.innerHTML = '';
+        (salon.specializations || []).forEach(spec => {
             const tag = document.createElement('span');
             tag.className = 'salon-tag';
-            tag.textContent = specNames[spec] || spec;
-            tagsContainer.appendChild(tag);
+            tag.textContent = getCategoryName(spec);
+            tagsEl.appendChild(tag);
         });
         
-        const salonActions = document.getElementById('salon-actions');
-        salonActions.innerHTML = '';
-        
+        actionsEl.innerHTML = '';
         if (currentUser && currentUser.role === 'client') {
-            salonActions.innerHTML = `
+            actionsEl.innerHTML = `
                 <button class="btn btn-primary" id="book-this-salon">
                     <i class="fas fa-calendar-check"></i> Записаться
                 </button>
             `;
+            document.getElementById('book-this-salon').addEventListener('click', () => startBookingProcess());
         }
         
-        await loadSalonServices();
-        await loadSalonMasters();
-        await loadSalonReviews();
+        try {
+            const services = await getSalonServices(salonId);
+            servicesEl.innerHTML = '';
+            if (services.length === 0) {
+                servicesEl.innerHTML = '<p class="no-results">Услуги не найдены</p>';
+            } else {
+                services.forEach(service => {
+                    const card = createServiceCard(service);
+                    card.addEventListener('click', () => {
+                        currentSalon = salon;
+                        startBookingProcess();
+                    });
+                    servicesEl.appendChild(card);
+                });
+            }
+        } catch (error) {
+            console.error('Ошибка загрузки услуг салона:', error);
+            servicesEl.innerHTML = '<p class="no-results">Ошибка загрузки услуг</p>';
+        }
+        
+        try {
+            const masters = await getMasters({ salonId });
+            mastersEl.innerHTML = '';
+            if (masters.length === 0) {
+                mastersEl.innerHTML = '<p class="no-results">Мастера не найдены</p>';
+            } else {
+                masters.forEach(master => {
+                    master.salonName = salon.name;
+                    mastersEl.appendChild(createMasterCard(master));
+                });
+            }
+        } catch (error) {
+            console.error('Ошибка загрузки мастеров салона:', error);
+            mastersEl.innerHTML = '<p class="no-results">Ошибка загрузки мастеров</p>';
+        }
+        
+        try {
+            const reviews = await getReviews({ salonId });
+            reviewsEl.innerHTML = '';
+            if (reviews.length === 0) {
+                reviewsEl.innerHTML = '<div class="no-results">Отзывов пока нет</div>';
+            } else {
+                reviews.forEach(review => {
+                    const reviewItem = document.createElement('div');
+                    reviewItem.className = 'review-item';
+                    reviewItem.innerHTML = `
+                        <div class="review-header">
+                            <img src="${review.authorImage || getSafeImageUrl('avatar', review.authorName)}" class="review-author-img">
+                            <div>
+                                <div class="review-author">${review.authorName || 'Аноним'}</div>
+                                <div class="review-date">${formatDate(review.date)}</div>
+                            </div>
+                        </div>
+                        <div class="review-rating-stars">${renderStars(review.rating || 0)}</div>
+                        ${review.text ? `<div class="review-text">${review.text}</div>` : ''}
+                    `;
+                    reviewsEl.appendChild(reviewItem);
+                });
+            }
+        } catch (error) {
+            console.error('Ошибка загрузки отзывов:', error);
+            reviewsEl.innerHTML = '<p class="no-results">Ошибка загрузки отзывов</p>';
+        }
         
         selectedRating = 0;
         updateRatingDisplay();
     } catch (error) {
-        console.error('Ошибка загрузки страницы салона:', error);
-        showNotification('Ошибка загрузки данных салона', 'error');
+        console.error('Ошибка загрузки салона:', error);
+        showNotification('Ошибка загрузки данных', 'error');
     }
-}
-
-async function loadSalonServices() {
-    const container = document.getElementById('services-container');
-    if (!container || !currentSalon) return;
-    
-    const services = await getServices({ salonId: currentSalon.id });
-    
-    if (services.length === 0) {
-        container.innerHTML = '<p class="no-results">Услуги не найдены</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    services.forEach(service => {
-        container.appendChild(createServiceCard(service, currentSalon.name));
-    });
-}
-
-async function loadSalonMasters() {
-    const container = document.getElementById('masters-container');
-    if (!container || !currentSalon) return;
-    
-    const masters = await getMasters({ salonId: currentSalon.id });
-    
-    if (masters.length === 0) {
-        container.innerHTML = '<p class="no-results">Мастера не найдены</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    masters.forEach(master => {
-        container.appendChild(createMasterCard(master, currentSalon.name));
-    });
-}
-
-async function loadSalonReviews() {
-    const container = document.getElementById('salon-reviews-list');
-    if (!currentSalon || !container) return;
-    
-    const reviews = await getReviews({ salonId: currentSalon.id });
-    
-    if (reviews.length === 0) {
-        container.innerHTML = `
-            <div style="text-align: center; padding: 40px 20px; color: var(--text-light);">
-                <i class="far fa-comment" style="font-size: 48px; margin-bottom: 20px;"></i>
-                <p>Отзывов об этом салоне пока нет. Будьте первым!</p>
-            </div>
-        `;
-        return;
-    }
-    
-    container.innerHTML = '';
-    
-    reviews.forEach(review => {
-        const reviewItem = document.createElement('div');
-        reviewItem.className = 'review-item';
-        
-        const avatarUrl = review.authorImage || getSafeImageUrl('avatar', review.authorName);
-        
-        reviewItem.innerHTML = `
-            <div class="review-header">
-                <img src="${avatarUrl}" alt="${review.authorName}" class="review-author-img">
-                <div>
-                    <div class="review-author">${review.authorName || 'Анонимный пользователь'}</div>
-                    <div class="review-date">${formatDate(review.date)}</div>
-                </div>
-            </div>
-            <div class="review-rating-stars">${renderStars(review.rating || 0)}</div>
-            ${review.text ? `<div class="review-text">${review.text}</div>` : ''}
-        `;
-        
-        container.appendChild(reviewItem);
-    });
-}
-
-function updateRatingDisplay() {
-    const stars = document.querySelectorAll('#review-stars i');
-    const ratingText = document.getElementById('selected-rating-text');
-    
-    if (!stars.length || !ratingText) return;
-    
-    stars.forEach((star, index) => {
-        star.className = index < selectedRating ? 'fas fa-star active' : 'far fa-star';
-    });
-    
-    ratingText.textContent = selectedRating > 0 ? 
-        `${selectedRating} звезд${selectedRating === 1 ? 'а' : selectedRating < 5 ? 'ы' : ''}` : 
-        '0 звёзд';
 }
 
 // ==============================================
-// СТРАНИЦА МАСТЕРА
+// СТРАНИЦА МАСТЕРА (ИСПРАВЛЕНО)
 // ==============================================
 async function loadMasterPage(masterId) {
+    showPage('master-page');
+    
+    const nameEl = document.getElementById('master-page-name');
+    const specEl = document.getElementById('master-page-specialization');
+    const imageEl = document.getElementById('master-main-image');
+    const ratingEl = document.getElementById('master-rating');
+    const salonEl = document.getElementById('master-salon-text');
+    const servicesEl = document.getElementById('master-services-container');
+    const reviewsEl = document.getElementById('master-reviews-list');
+    const actionsEl = document.getElementById('master-actions');
+    const tagsEl = document.getElementById('master-tags');
+    const descEl = document.getElementById('master-page-description');
+    
+    servicesEl.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка услуг...</div>';
+    reviewsEl.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка отзывов...</div>';
+    
     try {
         const masterDoc = await db.collection('masters').doc(masterId).get();
         if (!masterDoc.exists) {
             showNotification('Мастер не найден', 'error');
+            showPage('masters-page');
             return;
         }
         
-        selectedMaster = { id: masterDoc.id, ...masterDoc.data() };
+        const master = { id: masterDoc.id, ...masterDoc.data() };
+        selectedMaster = master;
         
         let salonName = 'Неизвестный салон';
-        if (selectedMaster.salonId) {
-            const salonDoc = await db.collection('salons').doc(selectedMaster.salonId).get();
-            if (salonDoc.exists) {
-                salonName = salonDoc.data().name;
-            }
+        if (master.salonId) {
+            const salonDoc = await db.collection('salons').doc(master.salonId).get();
+            if (salonDoc.exists) salonName = salonDoc.data().name;
         }
         
-        document.getElementById('master-page-name').textContent = selectedMaster.name;
-        document.getElementById('master-page-specialization').textContent = selectedMaster.specialization || 'Специализация не указана';
-        document.getElementById('master-main-image').src = selectedMaster.imageUrl || getSafeImageUrl('master', selectedMaster.name);
+        nameEl.textContent = master.name || 'Имя не указано';
+        specEl.textContent = master.specialization || 'Специализация не указана';
+        imageEl.src = master.imageUrl || getSafeImageUrl('master', master.name);
+        ratingEl.textContent = (parseFloat(master.rating) || 0).toFixed(1);
+        salonEl.textContent = salonName;
+        descEl.textContent = master.description || `Опытный мастер салона "${salonName}". Специализируется на ${master.specialization || 'различных услугах'}.`;
         
-        const masterRating = selectedMaster.rating !== undefined ? selectedMaster.rating : 0;
-        document.getElementById('master-rating').textContent = masterRating.toFixed(1);
-        
-        document.getElementById('master-salon-text').textContent = salonName;
-        
-        const masterTags = document.getElementById('master-tags');
-        if (masterTags) {
-            masterTags.innerHTML = '';
-            
-            if (selectedMaster.specialization) {
-                const tag = document.createElement('span');
-                tag.className = 'master-tag';
-                tag.textContent = selectedMaster.specialization;
-                masterTags.appendChild(tag);
-            }
+        tagsEl.innerHTML = '';
+        if (master.specialization) {
+            const tag = document.createElement('span');
+            tag.className = 'master-tag';
+            tag.textContent = master.specialization;
+            tagsEl.appendChild(tag);
         }
         
-        document.getElementById('master-page-description').textContent = 
-            `Опытный мастер салона "${salonName}". Специализируется на ${selectedMaster.specialization || 'различных услугах'}.`;
-        
-        const masterActions = document.getElementById('master-actions');
-        masterActions.innerHTML = '';
-        
+        actionsEl.innerHTML = '';
         if (currentUser && currentUser.role === 'client') {
-            masterActions.innerHTML = `
-                <button class="btn btn-primary" id="book-this-master">
-                    <i class="fas fa-calendar-check"></i> Записаться
-                </button>
-            `;
+            const bookBtn = document.createElement('button');
+            bookBtn.className = 'btn btn-primary';
+            bookBtn.id = 'book-this-master';
+            bookBtn.innerHTML = '<i class="fas fa-calendar-check"></i> Записаться';
+            bookBtn.addEventListener('click', () => startBookingForMaster(master.id));
+            actionsEl.appendChild(bookBtn);
         }
         
-        await loadMasterServices();
-        await loadMasterReviews(selectedMaster.id);
+        await loadMasterServices(master, servicesEl);
+        await loadMasterReviews(master.id, reviewsEl);
         
         selectedMasterRating = 0;
         updateMasterRatingDisplay();
+        
     } catch (error) {
-        console.error('Ошибка загрузки страницы мастера:', error);
-        showNotification('Ошибка загрузки данных мастера', 'error');
+        console.error('Ошибка загрузки мастера:', error);
+        servicesEl.innerHTML = '<p class="no-results">Ошибка загрузки услуг</p>';
+        reviewsEl.innerHTML = '<p class="no-results">Ошибка загрузки отзывов</p>';
+        showNotification('Ошибка загрузки данных', 'error');
     }
 }
 
-async function loadMasterServices() {
-    const container = document.getElementById('master-services-container');
-    if (!container || !selectedMaster) return;
-    
-    const services = await getServices({ salonId: selectedMaster.salonId });
-    
-    const category = getCategoryFromSpecialization(selectedMaster.specialization);
-    let filteredServices = services;
-    if (category) {
-        filteredServices = services.filter(s => s.category === category);
-    }
-    
-    if (filteredServices.length === 0) {
-        container.innerHTML = '<p class="no-results">Услуги не найдены</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    
-    filteredServices.forEach(service => {
-        const serviceCard = document.createElement('div');
-        serviceCard.className = 'service-card';
-        serviceCard.setAttribute('data-service-id', service.id);
-        
-        const imageUrl = service.imageUrl || getSafeImageUrl('service', service.name);
-        
-        serviceCard.innerHTML = `
-            <img src="${imageUrl}" alt="${service.name}" class="service-img">
-            <div class="service-info">
-                <h3 class="service-name">${service.name}</h3>
-                <p class="service-category">${getCategoryName(service.category)}</p>
-                <p class="service-price">${service.price || 0} ₽</p>
-                ${currentUser && currentUser.role === 'client' ? `
-                <button class="btn btn-primary" onclick="startBookingForService('${service.id}')">
-                    <i class="fas fa-calendar-check"></i> Выбрать
-                </button>
-                ` : ''}
-            </div>
-        `;
-        
-        container.appendChild(serviceCard);
-    });
-}
-
-// ==============================================
-// СТРАНИЦА УСЛУГИ (оригинальная, для конкретного салона)
-// ==============================================
-async function loadServicePage(serviceId) {
+async function loadMasterServices(master, container) {
     try {
-        const serviceDoc = await db.collection('services').doc(serviceId).get();
-        if (!serviceDoc.exists) {
-            showNotification('Услуга не найдена', 'error');
+        if (!master.salonId) {
+            container.innerHTML = '<p class="no-results">Мастер не привязан к салону</p>';
             return;
         }
         
-        selectedService = { id: serviceDoc.id, ...serviceDoc.data() };
+        const salonServices = await getSalonServices(master.salonId);
+        const providedServiceIds = master.providedServices || [];
         
-        let salonName = 'Неизвестный салон';
-        if (selectedService.salonId) {
-            const salonDoc = await db.collection('salons').doc(selectedService.salonId).get();
-            if (salonDoc.exists) {
-                salonName = salonDoc.data().name;
-            }
+        if (providedServiceIds.length === 0) {
+            container.innerHTML = '<p class="no-results">У мастера нет услуг</p>';
+            return;
         }
         
-        document.getElementById('service-page-name').textContent = selectedService.name;
-        document.getElementById('service-page-category').textContent = getCategoryName(selectedService.category);
-        document.getElementById('service-main-image').src = selectedService.imageUrl || getSafeImageUrl('service', selectedService.name);
-        document.getElementById('service-page-price').textContent = `${selectedService.price || 0} ₽`;
-        document.getElementById('service-page-duration').textContent = `Длительность: ${selectedService.duration || 60} минут`;
-        document.getElementById('service-salon-text').textContent = salonName;
+        const masterServices = salonServices.filter(s => providedServiceIds.includes(s.id));
         
-        document.getElementById('service-page-description').innerHTML = `
-            <p>Профессиональная услуга в салоне "${salonName}". Качественное выполнение с использованием современных технологий и материалов.</p>
-        `;
+        container.innerHTML = '';
+        if (masterServices.length === 0) {
+            container.innerHTML = '<p class="no-results">Услуги не найдены</p>';
+        } else {
+            masterServices.forEach(service => {
+                container.appendChild(createServiceCard(service));
+            });
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки услуг мастера:', error);
+        container.innerHTML = '<p class="no-results">Ошибка загрузки услуг</p>';
+    }
+}
+
+async function loadMasterReviews(masterId, container) {
+    try {
+        const reviews = await getMasterReviews(masterId);
         
-        const serviceActions = document.getElementById('service-actions');
-        serviceActions.innerHTML = '';
+        container.innerHTML = '';
+        if (reviews.length === 0) {
+            container.innerHTML = '<div class="no-results">Отзывов пока нет</div>';
+        } else {
+            reviews.forEach(review => {
+                const reviewItem = document.createElement('div');
+                reviewItem.className = 'review-item';
+                reviewItem.innerHTML = `
+                    <div class="review-header">
+                        <img src="${review.authorImage || getSafeImageUrl('avatar', review.authorName)}" class="review-author-img">
+                        <div>
+                            <div class="review-author">${review.authorName || 'Аноним'}</div>
+                            <div class="review-date">${formatDate(review.date)}</div>
+                        </div>
+                    </div>
+                    <div class="review-rating-stars">${renderStars(review.rating || 0)}</div>
+                    ${review.text ? `<div class="review-text">${review.text}</div>` : ''}
+                `;
+                container.appendChild(reviewItem);
+            });
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки отзывов:', error);
+        container.innerHTML = '<p class="no-results">Ошибка загрузки отзывов</p>';
+    }
+}
+
+// ==============================================
+// СТРАНИЦА УСЛУГИ
+// ==============================================
+async function showServicePage(serviceName) {
+    showPage('service-page');
+    
+    const nameEl = document.getElementById('service-page-name');
+    const categoryEl = document.getElementById('service-page-category');
+    const priceEl = document.getElementById('service-page-price');
+    const durationEl = document.getElementById('service-page-duration');
+    const imageEl = document.getElementById('service-main-image');
+    const salonsEl = document.getElementById('service-salons-container');
+    const mastersEl = document.getElementById('service-masters-container');
+    const actionsEl = document.getElementById('service-actions');
+    
+    salonsEl.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+    mastersEl.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+    
+    history.pushState({}, '', `#service/${encodeURIComponent(serviceName)}`);
+    
+    try {
+        const details = await getServiceDetails(serviceName);
         
+        if (!details) {
+            showNotification('Услуга не найдена', 'error');
+            showPage('services-page');
+            return;
+        }
+        
+        nameEl.textContent = details.name;
+        categoryEl.textContent = getCategoryName(details.category);
+        priceEl.textContent = `${details.price} ₽`;
+        durationEl.textContent = `Длительность: ${details.duration || 60} мин`;
+        imageEl.src = details.imageUrl || getSafeImageUrl('service', details.name);
+        
+        selectedService = details;
+        
+        actionsEl.innerHTML = '';
         if (currentUser && currentUser.role === 'client') {
-            serviceActions.innerHTML = `
-                <button class="btn btn-primary" id="book-this-service">
+            actionsEl.innerHTML = `
+                <button class="btn btn-primary" onclick="showNotification('Выберите салон из списка', 'info')">
                     <i class="fas fa-calendar-check"></i> Записаться
                 </button>
             `;
         }
         
-        await loadServiceMasters();
+        salonsEl.innerHTML = '';
+        if (details.salons.length === 0) {
+            salonsEl.innerHTML = '<p class="no-results">Салоны не найдены</p>';
+        } else {
+            details.salons.forEach(salon => {
+                const card = createSalonCard(salon);
+                card.addEventListener('click', (e) => {
+                    if (!e.target.closest('button')) {
+                        currentSalon = salon;
+                        startBookingProcess();
+                    }
+                });
+                salonsEl.appendChild(card);
+            });
+        }
+        
+        mastersEl.innerHTML = '';
+        if (details.masters.length === 0) {
+            mastersEl.innerHTML = '<p class="no-results">Мастера не найдены</p>';
+        } else {
+            details.masters.forEach(master => {
+                mastersEl.appendChild(createMasterCard(master));
+            });
+        }
     } catch (error) {
-        console.error('Ошибка загрузки страницы услуги:', error);
-        showNotification('Ошибка загрузки данных услуги', 'error');
+        console.error('Ошибка загрузки услуги:', error);
+        showNotification('Ошибка загрузки данных', 'error');
     }
 }
 
-async function loadServiceMasters() {
-    const container = document.getElementById('service-masters-container');
-    if (!container || !selectedService) return;
-    
-    const masters = await getMasters({ salonId: selectedService.salonId });
-    
-    const category = selectedService.category;
-    const filteredMasters = masters.filter(master => {
-        const masterCategory = getCategoryFromSpecialization(master.specialization);
-        return masterCategory === category;
-    });
-    
-    if (filteredMasters.length === 0) {
-        container.innerHTML = '<p class="no-results">Мастера не найдены</p>';
+// ==============================================
+// АДМИН-ПАНЕЛЬ
+// ==============================================
+function setupAdminPage() {
+    if (!currentUser) {
+        document.getElementById('admin-page').innerHTML = `
+            <div class="container">
+                <h1 class="page-title">Доступ запрещен</h1>
+                <p>Только администраторы и мастера могут просматривать эту страницу.</p>
+            </div>
+        `;
         return;
     }
     
-    container.innerHTML = '';
+    const isAdmin = currentUser.role === 'admin';
+    const isMaster = currentUser.role === 'master';
     
-    filteredMasters.forEach(master => {
-        const masterCard = document.createElement('div');
-        masterCard.className = 'master-card';
-        masterCard.setAttribute('data-master-id', master.id);
+    document.getElementById('admin-page-title').textContent = isAdmin ? 'Админ-панель' : 'Мастер-панель';
+    
+    if (isAdmin) {
+        const switcher = document.getElementById('admin-mode-switcher');
+        if (switcher) {
+            switcher.innerHTML = `
+                <button class="mode-btn active" data-mode="admin">Режим администратора</button>
+                <button class="mode-btn" data-mode="actions-history">История действий</button>
+                <button class="mode-btn" data-mode="reviews-management">Управление отзывами</button>
+                <button class="mode-btn" data-mode="users-management">Управление пользователями</button>
+                <button class="mode-btn" data-mode="master-requests">Заявки мастеров</button>
+            `;
+        }
         
-        const imageUrl = master.imageUrl || getSafeImageUrl('master', master.name);
+        document.getElementById('admin-mode').style.display = 'block';
+        document.getElementById('actions-history-mode').style.display = 'none';
+        document.getElementById('reviews-management-mode').style.display = 'none';
+        document.getElementById('users-management-mode').style.display = 'none';
+        document.getElementById('master-requests-mode').style.display = 'none';
+        document.getElementById('master-mode').style.display = 'none';
         
-        masterCard.innerHTML = `
-            <img src="${imageUrl}" alt="${master.name}" class="master-img">
-            <div class="master-info">
-                <h3 class="master-name">${master.name}</h3>
-                <p class="master-specialization">${master.specialization || 'Не указано'}</p>
-                <div class="salon-rating" style="margin: 10px 0;">
-                    ${renderStars(master.rating || 0)}
-                    <span class="rating-value">${(master.rating || 0).toFixed(1)}</span>
-                </div>
-                <p class="master-price">${master.price || 0} ₽</p>
-                ${currentUser && currentUser.role === 'client' ? `
-                <button class="btn btn-primary" onclick="startBookingForMaster('${master.id}')">
-                    <i class="fas fa-calendar-check"></i> Выбрать
-                </button>
-                ` : ''}
+        updateAdminTables();
+        loadSelectOptions();
+        loadAdminStats();
+        populateSalonFilterForReviews();
+        loadMasterRequests();
+    } else if (isMaster) {
+        const switcher = document.getElementById('admin-mode-switcher');
+        if (switcher) {
+            switcher.innerHTML = `
+                <button class="mode-btn active" data-mode="master-bookings">Управление записями</button>
+                <button class="mode-btn" data-mode="master-actions-history">Мои действия</button>
+                <button class="mode-btn" data-mode="master-services">Мои услуги</button>
+            `;
+        }
+        
+        document.getElementById('admin-mode').style.display = 'none';
+        document.getElementById('actions-history-mode').style.display = 'none';
+        document.getElementById('reviews-management-mode').style.display = 'none';
+        document.getElementById('users-management-mode').style.display = 'none';
+        document.getElementById('master-requests-mode').style.display = 'none';
+        document.getElementById('master-mode').style.display = 'block';
+        document.getElementById('master-bookings-mode').style.display = 'block';
+        document.getElementById('master-actions-history-mode').style.display = 'none';
+        document.getElementById('master-services-mode').style.display = 'none';
+        
+        setupMasterPanel();
+    } else {
+        document.getElementById('admin-page').innerHTML = `
+            <div class="container">
+                <h1 class="page-title">Доступ запрещен</h1>
+                <p>Только администраторы и мастера могут просматривать эту страницу.</p>
             </div>
         `;
+    }
+}
+
+async function updateAdminTables() {
+    const salons = await getCachedData('salons');
+    const masters = await getCachedData('masters');
+    const users = await getCachedData('users');
+    const bookings = await getCachedData('bookings');
+    
+    const salonsTableBody = document.getElementById('salons-table-body');
+    if (salonsTableBody) {
+        salonsTableBody.innerHTML = '';
+        salons.forEach(salon => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${salon.name}</td>
+                <td>${salon.address || 'Не указан'}</td>
+                <td>${renderStars(salon.rating || 0)} ${(salon.rating || 0).toFixed(1)}</td>
+                <td>
+                    <button class="action-btn edit" onclick="editSalon('${salon.id}')">Изменить</button>
+                    <button class="action-btn delete" onclick="deleteSalon('${salon.id}')">Удалить</button>
+                </td>
+            `;
+            salonsTableBody.appendChild(row);
+        });
+    }
+    
+    const mastersTableBody = document.getElementById('masters-table-body');
+    if (mastersTableBody) {
+        mastersTableBody.innerHTML = '';
+        const salonMap = Object.fromEntries(salons.map(s => [s.id, s.name]));
         
-        container.appendChild(masterCard);
-    });
+        masters.forEach(master => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${master.name}</td>
+                <td>${master.specialization || 'Не указана'}</td>
+                <td>${master.price || 0} ₽</td>
+                <td>${salonMap[master.salonId] || 'Неизвестно'}</td>
+                <td>
+                    <button class="action-btn edit" onclick="editMaster('${master.id}')">Изменить</button>
+                    <button class="action-btn delete" onclick="deleteMaster('${master.id}')">Удалить</button>
+                </td>
+            `;
+            mastersTableBody.appendChild(row);
+        });
+    }
+    
+    const usersTableBody = document.getElementById('users-table-body');
+    if (usersTableBody) {
+        usersTableBody.innerHTML = '';
+        users.forEach(user => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${user.name || ''} ${user.lastname || ''}</td>
+                <td>${user.email || ''}</td>
+                <td>${getRoleName(user.role)}${user.isAdmin ? ' (админ)' : ''}</td>
+                <td>${user.phone || 'Не указан'}</td>
+                <td>${formatDate(user.registrationDate)}</td>
+                <td>
+                    <button class="action-btn edit" onclick="editUser('${user.id}')">Изменить</button>
+                    <button class="action-btn delete" onclick="deleteUser('${user.id}')">Удалить</button>
+                </td>
+            `;
+            usersTableBody.appendChild(row);
+        });
+    }
+    
+    const bookingsTableBody = document.getElementById('bookings-table-body');
+    if (bookingsTableBody) {
+        bookingsTableBody.innerHTML = '';
+        bookings.forEach(booking => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${booking.clientName || ''} ${booking.clientLastname || ''}</td>
+                <td>${booking.serviceName || 'Неизвестно'}</td>
+                <td>${booking.masterName || 'Неизвестно'}</td>
+                <td>${formatDate(booking.date)}</td>
+                <td>${booking.time || 'Не указано'}</td>
+                <td><span class="booking-status ${getStatusClass(booking.status)}">${booking.status || 'Неизвестно'}</span></td>
+                <td>
+                    ${(booking.status === 'Подтверждена' || !booking.status) ? `
+                        <button class="action-btn complete" onclick="updateBookingStatus('${booking.id}', 'Выполнено')">Выполнено</button>
+                        <button class="action-btn cancel" onclick="updateBookingStatus('${booking.id}', 'Отменено')">Отмена</button>
+                    ` : ''}
+                </td>
+            `;
+            bookingsTableBody.appendChild(row);
+        });
+    }
+    
+    await loadAdminServicesGrid();
+}
+
+function getStatusClass(status) {
+    const statuses = {
+        'Подтверждена': 'confirmed',
+        'Выполнено': 'completed',
+        'Отменено': 'cancelled',
+        'Перенесено': 'rescheduled'
+    };
+    return statuses[status] || '';
+}
+
+async function loadAdminStats() {
+    try {
+        const [salons, services, masters, users, bookings, reviews] = await Promise.all([
+            getCachedData('salons'),
+            getCachedData('services'),
+            getCachedData('masters'),
+            getCachedData('users'),
+            getCachedData('bookings'),
+            getCachedData('reviews')
+        ]);
+        
+        const statsContainer = document.getElementById('admin-stats');
+        if (statsContainer) {
+            statsContainer.innerHTML = `
+                <div class="stat-card"><h3>${salons.length}</h3><p>Салоны</p></div>
+                <div class="stat-card"><h3>${services.length}</h3><p>Услуги</p></div>
+                <div class="stat-card"><h3>${masters.length}</h3><p>Мастера</p></div>
+                <div class="stat-card"><h3>${users.length}</h3><p>Пользователи</p></div>
+                <div class="stat-card"><h3>${bookings.length}</h3><p>Записи</p></div>
+                <div class="stat-card"><h3>${reviews.length}</h3><p>Отзывы</p></div>
+            `;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки статистики:', error);
+    }
 }
 
 // ==============================================
-// ПРОЦЕСС БРОНИРОВАНИЯ
+// УПРАВЛЕНИЕ УСЛУГАМИ В АДМИН-ПАНЕЛИ
+// ==============================================
+async function loadAdminServicesGrid() {
+    const container = document.getElementById('admin-services-grid');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+    
+    try {
+        const uniqueServices = await getUniqueServices();
+        
+        if (uniqueServices.length === 0) {
+            container.innerHTML = '<p class="no-results">Услуги не найдены</p>';
+            return;
+        }
+        
+        container.innerHTML = '';
+        
+        const servicePromises = uniqueServices.map(async service => {
+            const details = await getServiceDetails(service.name);
+            return { service, details };
+        });
+        
+        const servicesWithDetails = await Promise.all(servicePromises);
+        
+        servicesWithDetails.forEach(({ service, details }) => {
+            const card = document.createElement('div');
+            card.className = 'service-card';
+            card.dataset.serviceName = service.name;
+            
+            const imageUrl = service.imageUrl || getSafeImageUrl('service', service.name);
+            const salonsCount = details?.salons?.length || 0;
+            const mastersCount = details?.masters?.length || 0;
+            
+            card.innerHTML = `
+                <img src="${imageUrl}" alt="${service.name}" class="service-img" loading="lazy" style="height: 160px;">
+                <div class="service-info">
+                    <h3 class="service-name" style="font-size: 16px;">${service.name}</h3>
+                    <p class="service-category" style="font-size: 13px;">${getCategoryName(service.category)}</p>
+                    <p class="service-price" style="font-size: 18px;">${service.price} ₽</p>
+                    <p class="service-stats" style="font-size: 12px; color: var(--text-light); margin-bottom: 10px;">
+                        <i class="fas fa-store"></i> ${salonsCount} | 
+                        <i class="fas fa-user"></i> ${mastersCount}
+                    </p>
+                    <div class="service-actions" style="display: flex; gap: 8px;">
+                        <button class="btn-action primary edit-service" data-name="${service.name}" style="flex:1; padding: 6px 12px; font-size: 12px;">
+                            <i class="fas fa-edit"></i> Управление
+                        </button>
+                        <button class="btn-action danger delete-service" data-name="${service.name}" style="flex:1; padding: 6px 12px; font-size: 12px;">
+                            <i class="fas fa-trash"></i> Удалить
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            const editBtn = card.querySelector('.edit-service');
+            const deleteBtn = card.querySelector('.delete-service');
+            
+            editBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openServiceManagementModal(service.name);
+            });
+            
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (confirm(`Удалить услугу "${service.name}" из всех салонов?`)) {
+                    deleteServiceByName(service.name);
+                }
+            });
+            
+            card.addEventListener('click', function(e) {
+                if (!e.target.closest('button')) {
+                    showServicePage(service.name);
+                }
+            });
+            
+            container.appendChild(card);
+        });
+    } catch (error) {
+        console.error('Ошибка загрузки услуг:', error);
+        container.innerHTML = '<p class="no-results">Ошибка загрузки</p>';
+    }
+}
+
+async function openServiceManagementModal(serviceName) {
+    showNotification('Загрузка данных...', 'info');
+    
+    try {
+        const [serviceDetails, availableData, availableMasters] = await Promise.all([
+            getServiceDetails(serviceName),
+            getAvailableSalonsForService(serviceName),
+            getAvailableMastersForService(serviceName)
+        ]);
+        
+        const oldModal = document.getElementById('service-management-modal');
+        if (oldModal) oldModal.remove();
+        
+        const modalHtml = `
+            <div id="service-management-modal" class="modal active">
+                <div class="modal-content" style="max-width: 800px;">
+                    <button class="modal-close" id="service-management-close">&times;</button>
+                    <h2 class="modal-title">Управление услугой: ${serviceName}</h2>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Основная информация</label>
+                        <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap; margin-bottom: 20px;">
+                            <img src="${serviceDetails.imageUrl || getSafeImageUrl('service', serviceName)}" 
+                                 style="width: 100px; height: 100px; object-fit: cover; border-radius: var(--radius-md);">
+                            <div>
+                                <p><strong>Категория:</strong> ${getCategoryName(serviceDetails.category)}</p>
+                                <p><strong>Цена:</strong> ${serviceDetails.price} ₽</p>
+                                <p><strong>Длительность:</strong> ${serviceDetails.duration || 60} мин</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Изменить изображение</label>
+                        <input type="file" id="service-image-update" accept="image/*" class="form-input">
+                        <input type="url" id="service-image-url-update" placeholder="Или ссылка на изображение" class="form-input" style="margin-top: 10px;">
+                        <button class="btn btn-secondary" id="update-service-image" style="margin-top: 10px;">
+                            <i class="fas fa-save"></i> Обновить изображение
+                        </button>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Салоны, предоставляющие услугу (${availableData.existing.length})</label>
+                        <div class="checkbox-group" style="max-height: 200px;">
+                            ${availableData.existing.map(salon => `
+                                <div class="checkbox-item" style="display: flex; align-items: center; padding: 8px; border-bottom: 1px solid var(--border-color);">
+                                    <i class="fas fa-store" style="color: var(--primary-color); margin-right: 10px;"></i>
+                                    <span style="flex:1;">${salon.name}</span>
+                                    <button class="btn-action danger remove-from-salon" data-salon-id="${salon.id}" style="padding: 4px 8px; font-size: 11px;">
+                                        <i class="fas fa-trash"></i> Удалить
+                                    </button>
+                                </div>
+                            `).join('')}
+                            ${availableData.existing.length === 0 ? '<p class="text-muted">Услуга не предоставляется ни в одном салоне</p>' : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Добавить в салон</label>
+                        <select id="add-to-salon-select" class="form-input">
+                            <option value="">Выберите салон</option>
+                            ${availableData.available.map(salon => `
+                                <option value="${salon.id}">${salon.name}</option>
+                            `).join('')}
+                        </select>
+                        <button class="btn btn-secondary" id="add-service-to-salon" style="margin-top: 10px;">
+                            <i class="fas fa-plus"></i> Добавить в выбранный салон
+                        </button>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Мастера, выполняющие услугу (${availableMasters.existing.length})</label>
+                        <div class="checkbox-group" style="max-height: 200px;">
+                            ${availableMasters.existing.map(master => `
+                                <div class="checkbox-item" style="display: flex; align-items: center; padding: 8px; border-bottom: 1px solid var(--border-color);">
+                                    <i class="fas fa-user" style="color: var(--primary-color); margin-right: 10px;"></i>
+                                    <span style="flex:1;">${master.name} (${master.salonName})</span>
+                                    <button class="btn-action danger remove-from-master" data-master-id="${master.id}" style="padding: 4px 8px; font-size: 11px;">
+                                        <i class="fas fa-trash"></i> Удалить
+                                    </button>
+                                </div>
+                            `).join('')}
+                            ${availableMasters.existing.length === 0 ? '<p class="text-muted">Ни один мастер не выполняет эту услугу</p>' : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Добавить мастеру</label>
+                        <select id="add-to-master-select" class="form-input">
+                            <option value="">Выберите мастера</option>
+                            ${availableMasters.available.map(master => `
+                                <option value="${master.id}">${master.name} (${master.salonName})</option>
+                            `).join('')}
+                        </select>
+                        <button class="btn btn-secondary" id="add-service-to-master" style="margin-top: 10px;">
+                            <i class="fas fa-plus"></i> Добавить выбранному мастеру
+                        </button>
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button class="btn btn-secondary" id="close-service-management">Закрыть</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        attachServiceModalHandlers(serviceName);
+    } catch (error) {
+        console.error('Ошибка открытия модального окна:', error);
+        showNotification('Ошибка загрузки данных', 'error');
+    }
+}
+
+function attachServiceModalHandlers(serviceName) {
+    document.getElementById('service-management-close')?.addEventListener('click', () => {
+        document.getElementById('service-management-modal').remove();
+    });
+    
+    document.getElementById('close-service-management')?.addEventListener('click', () => {
+        document.getElementById('service-management-modal').remove();
+    });
+    
+    document.getElementById('update-service-image')?.addEventListener('click', async () => {
+        const fileInput = document.getElementById('service-image-update');
+        const urlInput = document.getElementById('service-image-url-update');
+        
+        let imageUrl = null;
+        
+        if (fileInput.files.length > 0) {
+            imageUrl = await uploadImage(fileInput.files[0], 'services');
+        } else if (urlInput.value.trim()) {
+            imageUrl = urlInput.value.trim();
+        }
+        
+        if (imageUrl) {
+            await updateServiceImage(serviceName, imageUrl);
+            showNotification('Изображение обновлено');
+            document.getElementById('service-management-modal').remove();
+            openServiceManagementModal(serviceName);
+            loadAdminServicesGrid();
+        } else {
+            showNotification('Выберите файл или укажите ссылку', 'error');
+        }
+    });
+    
+    document.querySelectorAll('.remove-from-salon').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const salonId = e.target.closest('button').dataset.salonId;
+            if (confirm(`Удалить услугу из этого салона?`)) {
+                await removeServiceFromSalon(serviceName, salonId);
+                document.getElementById('service-management-modal').remove();
+                openServiceManagementModal(serviceName);
+                loadAdminServicesGrid();
+                clearCache();
+            }
+        });
+    });
+    
+    document.querySelectorAll('.remove-from-master').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const masterId = e.target.closest('button').dataset.masterId;
+            if (confirm(`Убрать эту услугу у мастера?`)) {
+                await removeServiceFromMaster(serviceName, masterId);
+                document.getElementById('service-management-modal').remove();
+                openServiceManagementModal(serviceName);
+                loadAdminServicesGrid();
+                clearCache();
+            }
+        });
+    });
+    
+    document.getElementById('add-service-to-salon')?.addEventListener('click', async () => {
+        const salonId = document.getElementById('add-to-salon-select').value;
+        if (!salonId) {
+            showNotification('Выберите салон', 'error');
+            return;
+        }
+        const serviceDetails = await getServiceDetails(serviceName);
+        await addServiceToSalon(serviceName, salonId, serviceDetails);
+        document.getElementById('service-management-modal').remove();
+        openServiceManagementModal(serviceName);
+        loadAdminServicesGrid();
+        clearCache();
+    });
+    
+    document.getElementById('add-service-to-master')?.addEventListener('click', async () => {
+        const masterId = document.getElementById('add-to-master-select').value;
+        if (!masterId) {
+            showNotification('Выберите мастера', 'error');
+            return;
+        }
+        await addServiceToMaster(serviceName, masterId);
+        document.getElementById('service-management-modal').remove();
+        openServiceManagementModal(serviceName);
+        loadAdminServicesGrid();
+        clearCache();
+    });
+}
+
+async function getAvailableSalonsForService(serviceName) {
+    try {
+        const allSalons = await getCachedData('salons');
+        const serviceDetails = await getServiceDetails(serviceName);
+        
+        const existingSalonIds = serviceDetails?.allSalonIds || [];
+        const availableSalons = allSalons.filter(salon => 
+            !existingSalonIds.includes(salon.id)
+        );
+        
+        return {
+            existing: serviceDetails?.salons || [],
+            available: availableSalons
+        };
+    } catch (error) {
+        console.error('Ошибка загрузки доступных салонов:', error);
+        return { existing: [], available: [] };
+    }
+}
+
+async function getAvailableMastersForService(serviceName) {
+    try {
+        const allMasters = await getCachedData('masters');
+        const serviceDetails = await getServiceDetails(serviceName);
+        const serviceIds = serviceDetails?.serviceIds || [];
+        
+        const existingMasterIds = serviceDetails?.masters.map(m => m.id) || [];
+        const availableMasters = allMasters.filter(master => {
+            const hasService = (master.providedServices || []).some(serviceId => 
+                serviceIds.includes(serviceId)
+            );
+            return !hasService && master.salonId && serviceDetails?.allSalonIds?.includes(master.salonId);
+        });
+        
+        return {
+            existing: serviceDetails?.masters || [],
+            available: availableMasters
+        };
+    } catch (error) {
+        console.error('Ошибка загрузки доступных мастеров:', error);
+        return { existing: [], available: [] };
+    }
+}
+
+async function updateServiceImage(serviceName, imageUrl) {
+    try {
+        const servicesSnapshot = await db.collection('services')
+            .where('name', '==', serviceName)
+            .get();
+        
+        const batch = db.batch();
+        servicesSnapshot.forEach(doc => {
+            batch.update(doc.ref, { imageUrl: imageUrl });
+        });
+        await batch.commit();
+    } catch (error) {
+        console.error('Ошибка обновления изображения:', error);
+        throw error;
+    }
+}
+
+async function removeServiceFromSalon(serviceName, salonId) {
+    try {
+        const servicesSnapshot = await db.collection('services')
+            .where('name', '==', serviceName)
+            .where('salonId', '==', salonId)
+            .get();
+        
+        const batch = db.batch();
+        const serviceIds = servicesSnapshot.docs.map(doc => doc.id);
+        
+        servicesSnapshot.forEach(doc => batch.delete(doc.ref));
+        
+        const salonRef = db.collection('salons').doc(salonId);
+        batch.update(salonRef, {
+            serviceIds: firebase.firestore.FieldValue.arrayRemove(...serviceIds)
+        });
+        
+        const mastersSnapshot = await db.collection('masters')
+            .where('salonId', '==', salonId)
+            .get();
+        
+        mastersSnapshot.forEach(masterDoc => {
+            batch.update(masterDoc.ref, {
+                providedServices: firebase.firestore.FieldValue.arrayRemove(...serviceIds)
+            });
+        });
+        
+        await batch.commit();
+        showNotification('Услуга удалена из салона');
+    } catch (error) {
+        console.error('Ошибка удаления услуги из салона:', error);
+        showNotification('Ошибка при удалении', 'error');
+    }
+}
+
+async function removeServiceFromMaster(serviceName, masterId) {
+    try {
+        const masterDoc = await db.collection('masters').doc(masterId).get();
+        if (!masterDoc.exists) return;
+        
+        const master = masterDoc.data();
+        const salonId = master.salonId;
+        
+        const servicesSnapshot = await db.collection('services')
+            .where('name', '==', serviceName)
+            .where('salonId', '==', salonId)
+            .get();
+        
+        if (servicesSnapshot.empty) return;
+        
+        const serviceId = servicesSnapshot.docs[0].id;
+        
+        await db.collection('masters').doc(masterId).update({
+            providedServices: firebase.firestore.FieldValue.arrayRemove(serviceId)
+        });
+        
+        const providedServiceIds = (master.providedServices || []).filter(id => id !== serviceId);
+        const services = [];
+        for (const id of providedServiceIds) {
+            const s = await db.collection('services').doc(id).get();
+            if (s.exists) services.push(s.data());
+        }
+        const avgPrice = services.length ? Math.round(services.reduce((sum, s) => sum + s.price, 0) / services.length) : 0;
+        await db.collection('masters').doc(masterId).update({ price: avgPrice });
+        
+        showNotification('Услуга удалена у мастера');
+    } catch (error) {
+        console.error('Ошибка удаления услуги у мастера:', error);
+        showNotification('Ошибка при удалении', 'error');
+    }
+}
+
+async function addServiceToSalon(serviceName, salonId, serviceTemplate) {
+    try {
+        const existingService = await db.collection('services')
+            .where('name', '==', serviceName)
+            .where('salonId', '==', salonId)
+            .get();
+        
+        if (!existingService.empty) {
+            showNotification('Услуга уже есть в этом салоне', 'warning');
+            return;
+        }
+        
+        const serviceData = {
+            name: serviceName,
+            category: serviceTemplate.category,
+            price: serviceTemplate.price,
+            duration: serviceTemplate.duration || 60,
+            salonId: salonId,
+            imageUrl: serviceTemplate.imageUrl || null,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        const serviceRef = await db.collection('services').add(serviceData);
+        
+        await db.collection('salons').doc(salonId).update({
+            serviceIds: firebase.firestore.FieldValue.arrayUnion(serviceRef.id)
+        });
+        
+        showNotification('Услуга добавлена в салон');
+    } catch (error) {
+        console.error('Ошибка добавления услуги в салон:', error);
+        showNotification('Ошибка при добавлении', 'error');
+    }
+}
+
+async function addServiceToMaster(serviceName, masterId) {
+    try {
+        const masterDoc = await db.collection('masters').doc(masterId).get();
+        if (!masterDoc.exists) return;
+        
+        const master = masterDoc.data();
+        const salonId = master.salonId;
+        
+        const servicesSnapshot = await db.collection('services')
+            .where('name', '==', serviceName)
+            .where('salonId', '==', salonId)
+            .get();
+        
+        if (servicesSnapshot.empty) {
+            showNotification('Сначала добавьте услугу в салон', 'error');
+            return;
+        }
+        
+        const serviceId = servicesSnapshot.docs[0].id;
+        
+        if (master.providedServices && master.providedServices.includes(serviceId)) {
+            showNotification('Услуга уже есть у мастера', 'warning');
+            return;
+        }
+        
+        await db.collection('masters').doc(masterId).update({
+            providedServices: firebase.firestore.FieldValue.arrayUnion(serviceId)
+        });
+        
+        const providedServiceIds = [...(master.providedServices || []), serviceId];
+        const services = [];
+        for (const id of providedServiceIds) {
+            const s = await db.collection('services').doc(id).get();
+            if (s.exists) services.push(s.data());
+        }
+        const avgPrice = services.length ? Math.round(services.reduce((sum, s) => sum + s.price, 0) / services.length) : 0;
+        await db.collection('masters').doc(masterId).update({ price: avgPrice });
+        
+        showNotification('Услуга добавлена мастеру');
+    } catch (error) {
+        console.error('Ошибка добавления услуги мастеру:', error);
+        showNotification('Ошибка при добавлении', 'error');
+    }
+}
+
+async function deleteServiceByName(serviceName) {
+    try {
+        const servicesSnapshot = await db.collection('services')
+            .where('name', '==', serviceName)
+            .get();
+        
+        const serviceIds = servicesSnapshot.docs.map(doc => doc.id);
+        const batch = db.batch();
+        
+        servicesSnapshot.forEach(doc => batch.delete(doc.ref));
+        
+        const salonsSnapshot = await db.collection('salons')
+            .where('serviceIds', 'array-contains-any', serviceIds)
+            .get();
+        
+        salonsSnapshot.forEach(doc => {
+            batch.update(doc.ref, {
+                serviceIds: firebase.firestore.FieldValue.arrayRemove(...serviceIds)
+            });
+        });
+        
+        const mastersSnapshot = await db.collection('masters')
+            .where('providedServices', 'array-contains-any', serviceIds)
+            .get();
+        
+        mastersSnapshot.forEach(doc => {
+            batch.update(doc.ref, {
+                providedServices: firebase.firestore.FieldValue.arrayRemove(...serviceIds)
+            });
+        });
+        
+        await batch.commit();
+        showNotification('Услуга полностью удалена из всех салонов');
+        loadAdminServicesGrid();
+        clearCache();
+    } catch (error) {
+        console.error('Ошибка удаления услуги:', error);
+        showNotification('Ошибка при удалении', 'error');
+    }
+}
+
+// ==============================================
+// ФУНКЦИИ РЕДАКТИРОВАНИЯ
+// ==============================================
+async function editSalon(salonId) {
+    editingSalonId = salonId;
+    
+    try {
+        const salonDoc = await db.collection('salons').doc(salonId).get();
+        if (salonDoc.exists) {
+            const salon = salonDoc.data();
+            
+            document.getElementById('salon-name').value = salon.name || '';
+            document.getElementById('salon-address').value = salon.address || '';
+            document.getElementById('salon-district').value = salon.district || 'center';
+            document.getElementById('salon-description').value = salon.description || '';
+            
+            document.querySelectorAll('input[name="specialization"]').forEach(cb => cb.checked = false);
+            if (salon.specializations) {
+                salon.specializations.forEach(spec => {
+                    const checkbox = document.querySelector(`input[name="specialization"][value="${spec}"]`);
+                    if (checkbox) checkbox.checked = true;
+                });
+            }
+            
+            await loadSalonServicesCheckboxes(salon.serviceIds || []);
+            
+            document.getElementById('salon-image-url').value = salon.imageUrl || '';
+            document.getElementById('salon-image-preview').innerHTML = salon.imageUrl ? `<img src="${salon.imageUrl}" style="max-width: 200px;">` : '';
+            
+            document.getElementById('salon-modal-title').textContent = 'Редактировать салон';
+            showModal('add-salon-modal');
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки салона:', error);
+        showNotification('Ошибка загрузки данных', 'error');
+    }
+}
+
+async function editMaster(masterId) {
+    editingMasterId = masterId;
+    
+    try {
+        const masterDoc = await db.collection('masters').doc(masterId).get();
+        if (masterDoc.exists) {
+            const master = masterDoc.data();
+            
+            const nameParts = (master.name || '').split(' ');
+            document.getElementById('master-name').value = nameParts[0] || '';
+            document.getElementById('master-lastname').value = nameParts.slice(1).join(' ') || '';
+            
+            const specSelect = document.getElementById('master-specialization');
+            const predefinedSpecs = Array.from(specSelect.options).map(opt => opt.value).filter(v => v && v !== 'other');
+            if (predefinedSpecs.includes(master.specialization)) {
+                specSelect.value = master.specialization;
+                document.getElementById('master-specialization-other-group').style.display = 'none';
+            } else {
+                specSelect.value = 'other';
+                document.getElementById('master-specialization-other-group').style.display = 'block';
+                document.getElementById('master-specialization-other').value = master.specialization || '';
+            }
+            
+            document.getElementById('master-price').value = master.price || '';
+            
+            await loadSelectOptions();
+            if (master.salonId) document.getElementById('master-salon').value = master.salonId;
+            
+            await updateMasterServicesCheckboxes(master.salonId, master.providedServices || []);
+            
+            document.getElementById('master-email').style.display = 'none';
+            document.getElementById('master-password').style.display = 'none';
+            document.querySelector('label[for="master-email"]').style.display = 'none';
+            document.querySelector('label[for="master-password"]').style.display = 'none';
+            
+            document.getElementById('master-image-url').value = master.imageUrl || '';
+            document.getElementById('master-image-preview').innerHTML = master.imageUrl ? `<img src="${master.imageUrl}" style="max-width: 200px;">` : '';
+            
+            document.getElementById('master-modal-title').textContent = 'Редактировать мастера';
+            showModal('add-master-modal');
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки мастера:', error);
+        showNotification('Ошибка загрузки данных', 'error');
+    }
+}
+
+async function editUser(userId) {
+    editingUserId = userId;
+    
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            const user = userDoc.data();
+            
+            document.getElementById('edit-user-name').value = user.name || '';
+            document.getElementById('edit-user-lastname').value = user.lastname || '';
+            document.getElementById('edit-user-email').value = user.email || '';
+            document.getElementById('edit-user-phone').value = user.phone || '';
+            document.getElementById('edit-user-role').value = user.role || 'client';
+            
+            showModal('edit-user-modal');
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки пользователя:', error);
+        showNotification('Ошибка загрузки данных', 'error');
+    }
+}
+
+async function saveUser() {
+    const name = document.getElementById('edit-user-name').value.trim();
+    const lastname = document.getElementById('edit-user-lastname').value.trim();
+    const email = document.getElementById('edit-user-email').value.trim();
+    const phone = document.getElementById('edit-user-phone').value.trim();
+    const role = document.getElementById('edit-user-role').value;
+    
+    if (!name || !email || !role) {
+        showNotification('Заполните обязательные поля', 'error');
+        return;
+    }
+    
+    try {
+        const oldUserDoc = await db.collection('users').doc(editingUserId).get();
+        const oldData = oldUserDoc.exists ? oldUserDoc.data() : null;
+        
+        await db.collection('users').doc(editingUserId).update({ name, lastname, email, phone, role });
+        await logAction('user_update', 'user', editingUserId, { originalData: oldData }, `${name} ${lastname}`);
+        
+        showNotification('Данные пользователя обновлены');
+        hideModal('edit-user-modal');
+        updateAdminTables();
+        clearCache();
+    } catch (error) {
+        console.error('Ошибка обновления пользователя:', error);
+        showNotification('Ошибка при обновлении', 'error');
+    }
+}
+
+async function resetUserPassword() {
+    const email = document.getElementById('edit-user-email').value.trim();
+    if (!email) {
+        showNotification('Email пользователя не указан', 'error');
+        return;
+    }
+    try {
+        await auth.sendPasswordResetEmail(email);
+        showNotification(`Письмо для сброса пароля отправлено на ${email}`, 'success');
+    } catch (error) {
+        console.error('Ошибка отправки письма:', error);
+        showNotification('Ошибка при отправке письма', 'error');
+    }
+}
+
+// ==============================================
+// УДАЛЕНИЕ
+// ==============================================
+async function deleteSalon(salonId) {
+    if (!confirm('Вы уверены, что хотите удалить этот салон?')) return;
+    
+    try {
+        await db.collection('salons').doc(salonId).delete();
+        showNotification('Салон удален');
+        updateAdminTables();
+        clearCache();
+    } catch (error) {
+        console.error('Ошибка удаления салона:', error);
+        showNotification('Ошибка при удалении', 'error');
+    }
+}
+
+async function deleteMaster(masterId) {
+    if (!confirm('Вы уверены, что хотите удалить этого мастера?')) return;
+    
+    try {
+        await db.collection('masters').doc(masterId).delete();
+        showNotification('Мастер удален');
+        updateAdminTables();
+        clearCache();
+    } catch (error) {
+        console.error('Ошибка удаления мастера:', error);
+        showNotification('Ошибка при удалении', 'error');
+    }
+}
+
+async function deleteUser(userId) {
+    if (!confirm('Вы уверены, что хотите удалить этого пользователя?')) return;
+    
+    try {
+        await db.collection('users').doc(userId).delete();
+        showNotification('Пользователь удален');
+        updateAdminTables();
+        clearCache();
+    } catch (error) {
+        console.error('Ошибка удаления пользователя:', error);
+        showNotification('Ошибка при удалении', 'error');
+    }
+}
+
+// ==============================================
+// ОБНОВЛЕНИЕ СТАТУСА ЗАПИСИ
+// ==============================================
+async function updateBookingStatus(bookingId, newStatus) {
+    try {
+        const bookingDoc = await db.collection('bookings').doc(bookingId).get();
+        const oldData = bookingDoc.exists ? bookingDoc.data() : null;
+        
+        await db.collection('bookings').doc(bookingId).update({ status: newStatus });
+        await logAction('update', 'booking', bookingId, { originalData: oldData }, 'Статус записи изменен');
+        
+        showNotification(`Статус изменен на "${newStatus}"`);
+        
+        if (document.getElementById('admin-page').classList.contains('active')) updateAdminTables();
+        if (document.getElementById('profile-page').classList.contains('active')) loadUserBookings();
+        if (document.getElementById('master-mode').style.display !== 'none') {
+            if (currentActiveMasterId) {
+                await loadMasterBookingsForMaster(currentActiveMasterId);
+            }
+        }
+        if (document.getElementById('master-schedule-page').classList.contains('active')) {
+            loadDayBookings(document.querySelector('.calendar-date.selected')?.dataset.date || new Date().toISOString().split('T')[0]);
+        }
+        clearCache();
+    } catch (error) {
+        console.error('Ошибка обновления статуса:', error);
+        showNotification('Ошибка при изменении статуса', 'error');
+    }
+}
+
+// ==============================================
+// МАСТЕР-ПАНЕЛЬ (ИСПРАВЛЕНО)
+// ==============================================
+async function setupMasterPanel() {
+    if (!currentUser || currentUser.role !== 'master') {
+        showNotification('Доступ запрещен', 'error');
+        return;
+    }
+    
+    document.getElementById('master-name-display').textContent = `Личный кабинет мастера: ${currentUser.name || ''} ${currentUser.lastname || ''}`;
+    
+    await populateMasterSelect();
+    
+    const masters = await getMasters({ userId: currentUser.id });
+    console.log('Найдено мастеров для пользователя:', masters);
+    
+    if (masters.length === 0) {
+        document.getElementById('master-detail-name').textContent = 'Не найден';
+        document.getElementById('master-detail-lastname').textContent = currentUser.lastname || '';
+        document.getElementById('master-detail-email').textContent = currentUser.email || '';
+        document.getElementById('master-detail-phone').textContent = currentUser.phone || 'Не указан';
+        document.getElementById('master-detail-salon').textContent = 'Не назначен';
+        document.getElementById('master-detail-specialization').textContent = 'Не указана';
+        
+        document.getElementById('master-bookings-table').innerHTML = '<tr><td colspan="7" class="no-results">Нет записей</td></tr>';
+        document.getElementById('master-services-list').innerHTML = '<p class="no-results">Услуги не найдены</p>';
+        
+        showNotification('Профиль мастера не найден. Обратитесь к администратору.', 'warning');
+        return;
+    }
+    
+    if (!currentActiveMasterId || !masters.some(m => m.id === currentActiveMasterId)) {
+        currentActiveMasterId = masters[0].id;
+    }
+    
+    const master = masters.find(m => m.id === currentActiveMasterId) || masters[0];
+    console.log('Выбран мастер:', master);
+    
+    let salonName = 'Неизвестно';
+    if (master.salonId) {
+        const salonDoc = await db.collection('salons').doc(master.salonId).get();
+        if (salonDoc.exists) salonName = salonDoc.data().name;
+    }
+    
+    document.getElementById('master-detail-name').textContent = master.name || 'Не указано';
+    document.getElementById('master-detail-lastname').textContent = currentUser.lastname || 'Не указано';
+    document.getElementById('master-detail-email').textContent = currentUser.email || 'Не указан';
+    document.getElementById('master-detail-phone').textContent = currentUser.phone || 'Не указан';
+    document.getElementById('master-detail-salon').textContent = salonName;
+    document.getElementById('master-detail-specialization').textContent = master.specialization || 'Не указана';
+    
+    await loadMasterBookingsForMaster(master.id);
+    await loadMasterServicesList(master.id);
+}
+
+async function populateMasterSelect() {
+    const select = document.getElementById('master-select');
+    if (!select) return;
+    
+    const masters = await getCachedData('masters');
+    const salons = await getCachedData('salons');
+    const salonMap = Object.fromEntries(salons.map(s => [s.id, s.name]));
+    
+    select.innerHTML = '<option value="">Выберите мастера</option>';
+    masters.forEach(master => {
+        const option = document.createElement('option');
+        option.value = master.id;
+        option.textContent = `${master.name} (${salonMap[master.salonId] || 'Неизвестный салон'})`;
+        select.appendChild(option);
+    });
+    
+    if (masters.length > 0 && !currentActiveMasterId) {
+        currentActiveMasterId = masters[0].id;
+        select.value = currentActiveMasterId;
+    }
+}
+
+async function loadMasterBookingsForMaster(masterId) {
+    if (!masterId) return;
+    
+    const tableBody = document.getElementById('master-bookings-table');
+    if (!tableBody) return;
+    
+    tableBody.innerHTML = '<tr><td colspan="7" class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</td></tr>';
+    
+    try {
+        const bookings = await getBookings({ masterId: masterId });
+        
+        if (bookings.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="7" class="no-results">Нет записей</td></tr>';
+            return;
+        }
+        
+        bookings.sort((a, b) => {
+            const dateA = a.bookingDate ? new Date(a.bookingDate.toDate()) : new Date(a.date + 'T' + (a.time || '00:00'));
+            const dateB = b.bookingDate ? new Date(b.bookingDate.toDate()) : new Date(b.date + 'T' + (b.time || '00:00'));
+            return dateB - dateA;
+        });
+        
+        tableBody.innerHTML = '';
+        bookings.forEach(booking => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${booking.clientName || ''} ${booking.clientLastname || ''}</td>
+                <td>${booking.serviceName || 'Неизвестно'}</td>
+                <td>${formatDate(booking.date)}</td>
+                <td>${booking.time || 'Не указан'}</td>
+                <td>${booking.clientPhone || 'Не указан'}</td>
+                <td><span class="booking-status ${getStatusClass(booking.status)}">${booking.status || 'Неизвестно'}</span></td>
+                <td>
+                    ${(booking.status === 'Подтверждена' || !booking.status) ? `
+                        <button class="action-btn complete" onclick="updateBookingStatus('${booking.id}', 'Выполнено')">Выполнено</button>
+                        <button class="action-btn cancel" onclick="updateBookingStatus('${booking.id}', 'Отменено')">Отменить</button>
+                    ` : ''}
+                </td>
+            `;
+            tableBody.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Ошибка загрузки записей:', error);
+        tableBody.innerHTML = '<tr><td colspan="7" class="no-results">Ошибка загрузки</td></tr>';
+    }
+}
+
+async function loadMasterServicesList(masterId) {
+    const container = document.getElementById('master-services-list');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+    
+    try {
+        const masterDoc = await db.collection('masters').doc(masterId).get();
+        if (!masterDoc.exists) {
+            container.innerHTML = '<p class="no-results">Мастер не найден</p>';
+            return;
+        }
+        
+        const master = masterDoc.data();
+        const providedServiceIds = master.providedServices || [];
+        
+        if (providedServiceIds.length === 0) {
+            container.innerHTML = '<p class="no-results">У вас пока нет услуг</p>';
+            return;
+        }
+        
+        const services = [];
+        for (const serviceId of providedServiceIds) {
+            try {
+                const serviceDoc = await db.collection('services').doc(serviceId).get();
+                if (serviceDoc.exists) {
+                    services.push({ id: serviceDoc.id, ...serviceDoc.data() });
+                }
+            } catch (e) {
+                console.warn(`Услуга ${serviceId} не найдена`);
+            }
+        }
+        
+        if (services.length === 0) {
+            container.innerHTML = '<p class="no-results">Услуги не найдены</p>';
+            return;
+        }
+        
+        const uniqueServices = new Map();
+        services.forEach(service => {
+            if (!uniqueServices.has(service.name)) {
+                uniqueServices.set(service.name, service);
+            }
+        });
+        
+        container.innerHTML = '';
+        uniqueServices.forEach(service => {
+            const card = document.createElement('div');
+            card.className = 'service-card';
+            card.innerHTML = `
+                <img src="${service.imageUrl || getSafeImageUrl('service', service.name)}" alt="${service.name}" class="service-img">
+                <div class="service-info">
+                    <h3 class="service-name">${service.name}</h3>
+                    <p class="service-category">${getCategoryName(service.category)}</p>
+                    <p class="service-price">${service.price} ₽</p>
+                    <button class="btn-action danger remove-service-btn" data-service-name="${service.name}" style="position: absolute; top: 10px; right: 10px;">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+            
+            const removeBtn = card.querySelector('.remove-service-btn');
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (confirm(`Удалить услугу "${service.name}"?`)) {
+                    removeServiceFromMaster(service.name, masterId);
+                }
+            });
+            
+            container.appendChild(card);
+        });
+    } catch (error) {
+        console.error('Ошибка загрузки услуг мастера:', error);
+        container.innerHTML = '<p class="no-results">Ошибка загрузки</p>';
+    }
+}
+
+async function openAddMasterServiceModal() {
+    if (!currentActiveMasterId) {
+        showNotification('Сначала выберите мастера', 'error');
+        return;
+    }
+    
+    const masterDoc = await db.collection('masters').doc(currentActiveMasterId).get();
+    if (!masterDoc.exists) return;
+    
+    const master = masterDoc.data();
+    const salonId = master.salonId;
+    
+    const salonServices = await getSalonServices(salonId);
+    const uniqueServices = new Map();
+    salonServices.forEach(service => {
+        if (!uniqueServices.has(service.name)) {
+            uniqueServices.set(service.name, service);
+        }
+    });
+    
+    const provided = master.providedServices || [];
+    const providedNames = [];
+    for (const id of provided) {
+        const s = await db.collection('services').doc(id).get();
+        if (s.exists) providedNames.push(s.data().name);
+    }
+    
+    const availableServices = Array.from(uniqueServices.values()).filter(s => !providedNames.includes(s.name));
+    
+    const select = document.getElementById('master-service-select');
+    select.innerHTML = '';
+    
+    if (availableServices.length === 0) {
+        select.innerHTML = '<option>Нет доступных услуг</option>';
+    } else {
+        availableServices.forEach(s => {
+            const option = document.createElement('option');
+            option.value = s.name;
+            option.textContent = `${s.name} (${s.price} ₽)`;
+            select.appendChild(option);
+        });
+    }
+    
+    showModal('add-master-service-modal');
+}
+
+async function addServiceToMasterFromModal() {
+    const select = document.getElementById('master-service-select');
+    const serviceName = select.value;
+    
+    if (!serviceName || serviceName === 'Нет доступных услуг') {
+        showNotification('Выберите услугу', 'error');
+        return;
+    }
+    
+    await addServiceToMaster(serviceName, currentActiveMasterId);
+    hideModal('add-master-service-modal');
+    await loadMasterServicesList(currentActiveMasterId);
+}
+
+async function editMasterProfile() {
+    if (!currentUser || currentUser.role !== 'master') {
+        showNotification('Доступ запрещен', 'error');
+        return;
+    }
+    
+    const masters = await getMasters({ userId: currentUser.id });
+    if (masters.length === 0) return;
+    
+    const master = masters[0];
+    editingMasterId = master.id;
+    
+    document.getElementById('edit-master-name').value = master.firstName || master.name.split(' ')[0] || '';
+    document.getElementById('edit-master-lastname').value = master.lastName || master.name.split(' ')[1] || '';
+    document.getElementById('edit-master-email').value = currentUser.email || '';
+    document.getElementById('edit-master-phone').value = currentUser.phone || '';
+    document.getElementById('edit-master-specialization').value = master.specialization || '';
+    
+    showModal('edit-master-modal');
+}
+
+async function saveMasterProfile() {
+    const name = document.getElementById('edit-master-name').value.trim();
+    const lastname = document.getElementById('edit-master-lastname').value.trim();
+    const email = document.getElementById('edit-master-email').value.trim();
+    const phone = document.getElementById('edit-master-phone').value.trim();
+    const specialization = document.getElementById('edit-master-specialization').value;
+    
+    if (!name || !email || !specialization) {
+        showNotification('Заполните обязательные поля', 'error');
+        return;
+    }
+    
+    try {
+        await db.collection('users').doc(currentUser.id).update({
+            name, lastname, email, phone
+        });
+        
+        await db.collection('masters').doc(editingMasterId).update({
+            name: `${name} ${lastname}`,
+            firstName: name,
+            lastName: lastname,
+            specialization: specialization
+        });
+        
+        showNotification('Профиль обновлен');
+        hideModal('edit-master-modal');
+        await setupMasterPanel();
+        clearCache();
+    } catch (error) {
+        console.error('Ошибка сохранения:', error);
+        showNotification('Ошибка при сохранении', 'error');
+    }
+}
+
+async function deleteMasterProfile() {
+    if (!confirm('Удалить профиль мастера?')) return;
+    
+    try {
+        const masters = await getMasters({ userId: currentUser.id });
+        if (masters.length > 0) {
+            await db.collection('masters').doc(masters[0].id).delete();
+        }
+        await db.collection('users').doc(currentUser.id).update({ role: 'client' });
+        
+        showNotification('Профиль удален');
+        await logout();
+    } catch (error) {
+        console.error('Ошибка удаления:', error);
+        showNotification('Ошибка при удалении', 'error');
+    }
+}
+
+// ==============================================
+// КАЛЕНДАРЬ МАСТЕРА
+// ==============================================
+async function loadMasterSchedulePage() {
+    if (!currentUser || currentUser.role !== 'master') {
+        showNotification('Доступ только для мастеров', 'error');
+        showPage('home-page');
+        return;
+    }
+    
+    renderCalendar(currentCalendarMonth);
+    loadDayBookings(new Date().toISOString().split('T')[0]);
+}
+
+function renderCalendar(date) {
+    const container = document.getElementById('calendar-container');
+    if (!container) return;
+    
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+    
+    document.getElementById('current-month').textContent = `${monthNames[month]} ${year}`;
+    
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const firstDayIndex = (firstDay.getDay() + 6) % 7;
+    
+    let html = '<div class="calendar-grid">' + 
+        '<div class="calendar-day">Пн</div><div class="calendar-day">Вт</div><div class="calendar-day">Ср</div>' +
+        '<div class="calendar-day">Чт</div><div class="calendar-day">Пт</div><div class="calendar-day">Сб</div><div class="calendar-day">Вс</div>';
+    
+    for (let i = 0; i < firstDayIndex; i++) {
+        html += '<div class="calendar-date"></div>';
+    }
+    
+    const today = new Date().toISOString().split('T')[0];
+    
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+        const dayOfWeek = new Date(year, month, day).getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const isToday = dateStr === today;
+        
+        let className = 'calendar-date';
+        if (isToday) className += ' selected';
+        if (isWeekend) className += ' weekend';
+        
+        html += `<div class="${className}" data-date="${dateStr}">${day}</div>`;
+    }
+    
+    html += '</div>';
+    container.innerHTML = html;
+    
+    container.querySelectorAll('.calendar-date[data-date]').forEach(dateEl => {
+        dateEl.addEventListener('click', function() {
+            container.querySelectorAll('.calendar-date').forEach(el => el.classList.remove('selected'));
+            this.classList.add('selected');
+            loadDayBookings(this.dataset.date);
+        });
+    });
+    
+    const todayEl = container.querySelector(`.calendar-date[data-date="${today}"]`);
+    if (todayEl) todayEl.click();
+}
+
+function createBookingCard(booking) {
+    const card = document.createElement('div');
+    card.className = 'booking-card';
+    card.dataset.bookingId = booking.id;
+    
+    card.innerHTML = `
+        <div class="booking-time">${booking.time}</div>
+        <div class="booking-service">${booking.serviceName}</div>
+        <div class="booking-client">${booking.clientName} ${booking.clientLastname || ''}</div>
+        <div class="booking-price">${booking.totalPrice} ₽</div>
+        ${booking.clientComment ? `<div class="booking-comment">Комментарий: ${booking.clientComment}</div>` : ''}
+        <div class="booking-actions">
+            <button class="booking-action-complete" title="Выполнено"><i class="fas fa-check"></i></button>
+            <button class="booking-action-cancel" title="Отменить"><i class="fas fa-times"></i></button>
+        </div>
+    `;
+    
+    card.querySelector('.booking-action-complete').addEventListener('click', () => {
+        updateBookingStatus(booking.id, 'Выполнено');
+    });
+    card.querySelector('.booking-action-cancel').addEventListener('click', () => {
+        updateBookingStatus(booking.id, 'Отменено');
+    });
+    
+    return card;
+}
+
+async function loadDayBookings(date) {
+    if (!currentUser) return;
+    
+    const masters = await getMasters({ userId: currentUser.id });
+    if (masters.length === 0) return;
+    
+    const master = masters[0];
+    const bookings = await getBookings({ masterId: master.id, date: date, status: 'Подтверждена' });
+    
+    const container = document.getElementById('day-bookings');
+    const dateText = document.getElementById('selected-date-text');
+    if (!container || !dateText) return;
+    
+    dateText.textContent = formatDate(date);
+    
+    if (bookings.length === 0) {
+        container.innerHTML = '<div class="no-results">На эту дату нет записей</div>';
+        return;
+    }
+    
+    bookings.sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
+    container.innerHTML = '';
+    bookings.forEach(booking => container.appendChild(createBookingCard(booking)));
+}
+
+function prevMonth() {
+    currentCalendarMonth.setMonth(currentCalendarMonth.getMonth() - 1);
+    renderCalendar(currentCalendarMonth);
+}
+
+function nextMonth() {
+    currentCalendarMonth.setMonth(currentCalendarMonth.getMonth() + 1);
+    renderCalendar(currentCalendarMonth);
+}
+
+// ==============================================
+// ПРОЦЕСС БРОНИРОВАНИЯ (с автоматическим заполнением данных пользователя)
 // ==============================================
 async function startBookingForSalon(salonId) {
     if (!currentUser || currentUser.role !== 'client') {
-        showNotification('Только клиенты могут записываться на услуги', 'error');
+        showNotification('Только клиенты могут записываться', 'error');
         if (!currentUser) showModal('profile-modal');
         return;
     }
@@ -1704,33 +2894,9 @@ async function startBookingForSalon(salonId) {
     }
 }
 
-async function startBookingForService(serviceId) {
-    if (!currentUser || currentUser.role !== 'client') {
-        showNotification('Только клиенты могут записываться на услуги', 'error');
-        if (!currentUser) showModal('profile-modal');
-        return;
-    }
-    
-    try {
-        const serviceDoc = await db.collection('services').doc(serviceId).get();
-        if (serviceDoc.exists) {
-            selectedService = { id: serviceDoc.id, ...serviceDoc.data() };
-            
-            const salonDoc = await db.collection('salons').doc(selectedService.salonId).get();
-            if (salonDoc.exists) {
-                currentSalon = { id: salonDoc.id, ...salonDoc.data() };
-                startBookingProcess();
-            }
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки услуги:', error);
-        showNotification('Ошибка загрузки данных услуги', 'error');
-    }
-}
-
 async function startBookingForMaster(masterId) {
     if (!currentUser || currentUser.role !== 'client') {
-        showNotification('Только клиенты могут записываться на услуги', 'error');
+        showNotification('Только клиенты могут записываться', 'error');
         if (!currentUser) showModal('profile-modal');
         return;
     }
@@ -1748,7 +2914,7 @@ async function startBookingForMaster(masterId) {
         }
     } catch (error) {
         console.error('Ошибка загрузки мастера:', error);
-        showNotification('Ошибка загрузки данных мастера', 'error');
+        showNotification('Ошибка загрузки мастера', 'error');
     }
 }
 
@@ -1760,41 +2926,38 @@ async function startBookingProcess() {
     selectedDate = null;
     selectedTime = null;
     
-    const services = await getServices({ salonId: currentSalon.id });
-    const servicesContainer = document.getElementById('booking-services-container');
+    document.getElementById('client-name').value = currentUser?.name || '';
+    document.getElementById('client-lastname').value = currentUser?.lastname || '';
+    document.getElementById('client-phone').value = currentUser?.phone || '';
+    document.getElementById('client-comment').value = '';
     
+    const services = await getSalonServices(currentSalon.id);
+    const servicesContainer = document.getElementById('booking-services-container');
     if (!servicesContainer) return;
     
     servicesContainer.innerHTML = '';
-    
     if (services.length === 0) {
         servicesContainer.innerHTML = '<p class="no-results">Услуги не найдены</p>';
         return;
     }
     
     services.forEach(service => {
-        const serviceCard = document.createElement('div');
-        serviceCard.className = 'service-card';
-        serviceCard.setAttribute('data-service-id', service.id);
-        
-        const imageUrl = service.imageUrl || getSafeImageUrl('service', service.name);
-        
-        serviceCard.innerHTML = `
-            <img src="${imageUrl}" alt="${service.name}" class="service-img">
+        const card = document.createElement('div');
+        card.className = 'service-card';
+        card.dataset.serviceId = service.id;
+        card.innerHTML = `
+            <img src="${service.imageUrl || getSafeImageUrl('service', service.name)}" alt="${service.name}" class="service-img">
             <div class="service-info">
                 <h3 class="service-name">${service.name}</h3>
-                <p class="service-category">${getCategoryName(service.category)}</p>
                 <p class="service-price">${service.price || 0} ₽</p>
             </div>
         `;
-        
-        serviceCard.addEventListener('click', function() {
-            document.querySelectorAll('#booking-services-container .service-card').forEach(card => card.classList.remove('selected'));
-            serviceCard.classList.add('selected');
+        card.addEventListener('click', function() {
+            document.querySelectorAll('#booking-services-container .service-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
             selectedService = { id: service.id, name: service.name, price: service.price || 0, duration: service.duration || 60 };
         });
-        
-        servicesContainer.appendChild(serviceCard);
+        servicesContainer.appendChild(card);
     });
     
     showPage('booking-page');
@@ -1806,43 +2969,33 @@ async function loadMastersForBooking() {
     
     const masters = await getMasters({ salonId: currentSalon.id });
     const mastersContainer = document.getElementById('booking-masters-container');
-    
     if (!mastersContainer) return;
     
     mastersContainer.innerHTML = '';
-    
     if (masters.length === 0) {
         mastersContainer.innerHTML = '<p class="no-results">Мастера не найдены</p>';
         return;
     }
     
     masters.forEach(master => {
-        const masterCard = document.createElement('div');
-        masterCard.className = 'master-card';
-        masterCard.setAttribute('data-master-id', master.id);
-        
-        const imageUrl = master.imageUrl || getSafeImageUrl('master', master.name);
-        
-        masterCard.innerHTML = `
-            <img src="${imageUrl}" alt="${master.name}" class="master-img">
+        const card = document.createElement('div');
+        card.className = 'master-card';
+        card.dataset.masterId = master.id;
+        card.innerHTML = `
+            <img src="${master.imageUrl || getSafeImageUrl('master', master.name)}" alt="${master.name}" class="master-img">
             <div class="master-info">
                 <h3 class="master-name">${master.name}</h3>
                 <p class="master-specialization">${master.specialization || 'Не указано'}</p>
-                <div class="salon-rating" style="margin: 10px 0;">
-                    ${renderStars(master.rating || 0)}
-                    <span class="rating-value">${(master.rating || 0).toFixed(1)}</span>
-                </div>
+                <div class="salon-rating">${renderStars(master.rating || 0)}</div>
                 <p class="master-price">${master.price || 0} ₽</p>
             </div>
         `;
-        
-        masterCard.addEventListener('click', function() {
-            document.querySelectorAll('#booking-masters-container .master-card').forEach(card => card.classList.remove('selected'));
-            masterCard.classList.add('selected');
+        card.addEventListener('click', function() {
+            document.querySelectorAll('#booking-masters-container .master-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
             selectedMaster = { id: master.id, name: master.name };
         });
-        
-        mastersContainer.appendChild(masterCard);
+        mastersContainer.appendChild(card);
     });
 }
 
@@ -1855,41 +3008,27 @@ async function loadTimeSlots(date) {
         if (hour < 20) timeSlots.push(`${hour}:30`);
     }
     
-    const masterDoc = await db.collection('masters').doc(selectedMaster.id).get();
-    const masterData = masterDoc.exists ? masterDoc.data() : {};
-    const daysOff = masterData.daysOff || [];
-    const isDayOff = daysOff.includes(date);
-    
     const bookings = await getBookings({ masterId: selectedMaster.id, date: date });
     const bookedSlots = bookings.filter(b => b.status !== 'Отменено').map(b => b.time);
     
-    const timeSlotsContainer = document.getElementById('time-slots-container');
-    if (!timeSlotsContainer) return;
+    const container = document.getElementById('time-slots-container');
+    if (!container) return;
     
-    timeSlotsContainer.innerHTML = '';
-    
+    container.innerHTML = '';
     timeSlots.forEach(time => {
         const isBooked = bookedSlots.includes(time);
+        const slot = document.createElement('div');
+        slot.className = `time-slot ${isBooked ? 'booked' : ''}`;
+        slot.textContent = time;
         
-        const timeSlot = document.createElement('div');
-        
-        if (isDayOff || isBooked) {
-            timeSlot.className = 'time-slot booked';
-            timeSlot.title = isDayOff ? 'Выходной день мастера' : 'Это время уже занято';
-            timeSlot.textContent = time;
-        } else {
-            timeSlot.className = 'time-slot';
-            timeSlot.setAttribute('data-time', time);
-            timeSlot.textContent = time;
-            
-            timeSlot.addEventListener('click', function() {
-                document.querySelectorAll('.time-slot').forEach(slot => slot.classList.remove('selected'));
-                timeSlot.classList.add('selected');
+        if (!isBooked) {
+            slot.addEventListener('click', function() {
+                document.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'));
+                slot.classList.add('selected');
                 selectedTime = time;
             });
         }
-        
-        timeSlotsContainer.appendChild(timeSlot);
+        container.appendChild(slot);
     });
 }
 
@@ -1912,16 +3051,13 @@ function updateBookingSummary() {
         return;
     }
     
-    const totalPrice = selectedService.price || 0;
-    
     summaryContainer.innerHTML = `
-        <div class="summary-item"><span>Салон:</span><span>${currentSalon ? currentSalon.name : 'Неизвестно'}</span></div>
+        <div class="summary-item"><span>Салон:</span><span>${currentSalon?.name || 'Неизвестно'}</span></div>
         <div class="summary-item"><span>Услуга:</span><span>${selectedService.name}</span></div>
         <div class="summary-item"><span>Мастер:</span><span>${selectedMaster.name}</span></div>
         <div class="summary-item"><span>Дата:</span><span>${formatDate(selectedDate)}</span></div>
         <div class="summary-item"><span>Время:</span><span>${selectedTime}</span></div>
-        <div class="summary-item"><span>Длительность:</span><span>${selectedService.duration || 60} минут</span></div>
-        <div class="summary-item summary-total"><span>Итого:</span><span>${totalPrice} ₽</span></div>
+        <div class="summary-item summary-total"><span>Итого:</span><span>${selectedService.price} ₽</span></div>
     `;
 }
 
@@ -1931,57 +3067,24 @@ async function confirmBooking() {
     const phoneInput = document.getElementById('client-phone');
     const commentInput = document.getElementById('client-comment');
     
-    if (!nameInput || !lastnameInput || !phoneInput || !commentInput) return;
-    
-    let name = nameInput.value.trim();
-    let lastname = lastnameInput.value.trim();
-    let phone = phoneInput.value.trim();
+    let name = nameInput.value.trim() || currentUser?.name || '';
+    let lastname = lastnameInput.value.trim() || currentUser?.lastname || '';
+    let phone = phoneInput.value.trim() || currentUser?.phone || '';
     const comment = commentInput.value.trim();
     
-    if (currentUser) {
-        if (!name) name = currentUser.name || '';
-        if (!lastname) lastname = currentUser.lastname || '';
-        if (!phone && currentUser.phone) phone = currentUser.phone;
-        
-        nameInput.value = name;
-        lastnameInput.value = lastname;
-        phoneInput.value = phone;
-    }
-    
     if (!name || !lastname || !phone) {
-        showNotification('Пожалуйста, заполните все обязательные поля', 'error');
+        showNotification('Заполните обязательные поля', 'error');
         return;
     }
-    
-    const phoneRegex = /^(\+7|7|8)?[\s\-]?\(?[0-9]{3}\)?[\s\-]?[0-9]{3}[\s\-]?[0-9]{2}[\s\-]?[0-9]{2}$/;
-    if (!phoneRegex.test(phone.replace(/\s+/g, ''))) {
-        showNotification('Пожалуйста, введите корректный номер телефона', 'error');
-        return;
-    }
-    
-    let formattedPhone = phone.replace(/\D/g, '');
-    if (formattedPhone.startsWith('7') || formattedPhone.startsWith('8')) {
-        formattedPhone = '+7' + formattedPhone.substring(1);
-    } else if (!formattedPhone.startsWith('+7')) {
-        formattedPhone = '+7' + formattedPhone;
-    }
-    
-    if (formattedPhone.length !== 12) {
-        showNotification('Номер телефона должен содержать 11 цифр', 'error');
-        return;
-    }
-    
-    const displayPhone = formattedPhone.replace(/(\+7)(\d{3})(\d{3})(\d{2})(\d{2})/, '+7 ($2) $3-$4-$5');
-    phoneInput.value = displayPhone;
     
     if (!selectedService || !selectedMaster || !selectedDate || !selectedTime) {
-        showNotification('Пожалуйста, заполните все данные бронирования', 'error');
+        showNotification('Заполните все данные бронирования', 'error');
         return;
     }
     
     try {
         const bookingData = {
-            userId: currentUser ? currentUser.id : 'guest',
+            userId: currentUser?.id || 'guest',
             salonId: currentSalon.id,
             salonName: currentSalon.name,
             serviceId: selectedService.id,
@@ -1992,7 +3095,7 @@ async function confirmBooking() {
             time: selectedTime,
             clientName: name,
             clientLastname: lastname,
-            clientPhone: formattedPhone,
+            clientPhone: phone,
             clientComment: comment,
             totalPrice: selectedService.price || 0,
             duration: selectedService.duration || 60,
@@ -2000,24 +3103,14 @@ async function confirmBooking() {
             status: 'Подтверждена'
         };
         
-        const bookingRef = await db.collection('bookings').add(bookingData);
+        await db.collection('bookings').add(bookingData);
+        await logAction('booking', 'booking', 'new', bookingData, `Запись в ${currentSalon.name}`);
         
-        await logAction('booking', 'booking', bookingRef.id, {
-            salonId: currentSalon.id,
-            serviceId: selectedService.id,
-            masterId: selectedMaster.id
-        }, `Запись в ${currentSalon.name}`);
-        
-        nameInput.value = '';
-        lastnameInput.value = '';
-        phoneInput.value = '';
-        commentInput.value = '';
-        
-        showNotification('Запись успешно создана! Мы ждем вас в салоне.', 'success');
+        showNotification('Запись успешно создана!');
+        clearCache();
         
         setTimeout(() => {
-            if (currentUser) showPage('profile-page');
-            else showPage('home-page');
+            showPage(currentUser ? 'profile-page' : 'home-page');
         }, 2000);
     } catch (error) {
         console.error('Ошибка создания записи:', error);
@@ -2026,44 +3119,169 @@ async function confirmBooking() {
 }
 
 // ==============================================
-// ФУНКЦИИ ДЛЯ РАБОТЫ С РЕЙТИНГОМ САЛОНА
+// ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ
 // ==============================================
-async function updateSalonRating(salonId) {
+async function loadUserBookings() {
+    const container = document.getElementById('user-bookings-container');
+    if (!container) return;
+    
+    if (!currentUser || currentUser.role !== 'client') {
+        container.innerHTML = `<div class="auth-required-message">
+            <p>Для просмотра записей необходимо войти как клиент.</p>
+            <button class="btn" onclick="showModal('profile-modal')">Войти</button>
+        </div>`;
+        return;
+    }
+    
+    const bookings = await getBookings({ userId: currentUser.id });
+    
+    if (bookings.length === 0) {
+        container.innerHTML = `<div style="text-align: center; padding: 50px 0;">
+            <p>У вас пока нет записей.</p>
+            <button class="btn" onclick="showPage('salons-page')">Записаться</button>
+        </div>`;
+        return;
+    }
+    
+    bookings.sort((a, b) => new Date(b.bookingDate?.toDate() || 0) - new Date(a.bookingDate?.toDate() || 0));
+    
+    container.innerHTML = `
+        <h2 style="margin-bottom: 30px;">Мои записи (${bookings.length})</h2>
+        <div class="services-grid">
+            ${bookings.map(booking => `
+                <div class="service-card" style="position: relative;">
+                    <div style="position: absolute; top: 15px; right: 15px; background: ${getStatusColor(booking.status)}; color: white; padding: 6px 12px; border-radius: 20px; font-size: 12px;">${booking.status}</div>
+                    <div class="service-info">
+                        <h3 class="service-name">${booking.salonName}</h3>
+                        <p><strong>Услуга:</strong> ${booking.serviceName}</p>
+                        <p><strong>Мастер:</strong> ${booking.masterName}</p>
+                        <p><strong>Дата:</strong> ${formatDate(booking.date)} ${booking.time}</p>
+                        <p><strong>Цена:</strong> ${booking.totalPrice} ₽</p>
+                        ${booking.clientComment ? `<p><strong>Комментарий:</strong> ${booking.clientComment}</p>` : ''}
+                        ${booking.status === 'Подтверждена' ? `<div style="margin-top: 15px;"><button class="action-btn cancel" onclick="cancelUserBooking('${booking.id}')">Отменить запись</button></div>` : ''}
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function getStatusColor(status) {
+    const colors = {
+        'Подтверждена': 'var(--primary-color)',
+        'Выполнено': 'var(--success-color)',
+        'Отменено': 'var(--error-color)'
+    };
+    return colors[status] || 'var(--text-light)';
+}
+
+async function cancelUserBooking(bookingId) {
+    if (!confirm('Отменить запись?')) return;
+    
     try {
-        const reviews = await getReviews({ salonId: salonId });
-        
-        if (reviews.length === 0) {
-            await db.collection('salons').doc(salonId).update({
-                rating: 0,
-                reviewCount: 0,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            return 0;
+        await db.collection('bookings').doc(bookingId).update({ status: 'Отменено' });
+        showNotification('Запись отменена');
+        loadUserBookings();
+        clearCache();
+    } catch (error) {
+        console.error('Ошибка отмены:', error);
+        showNotification('Ошибка при отмене', 'error');
+    }
+}
+
+// ==============================================
+// ОТЗЫВЫ О МАСТЕРАХ
+// ==============================================
+async function submitMasterReview() {
+    if (!currentUser) {
+        showNotification('Авторизуйтесь, чтобы оставить отзыв', 'error');
+        showModal('profile-modal');
+        return;
+    }
+    
+    if (!selectedMaster) {
+        showNotification('Мастер не выбран', 'error');
+        return;
+    }
+    
+    const text = document.getElementById('master-review-text')?.value.trim() || '';
+    const rating = selectedMasterRating;
+    
+    if (rating === 0) {
+        showNotification('Оцените мастера', 'error');
+        return;
+    }
+    
+    try {
+        const existing = await db.collection('master_reviews')
+            .where('masterId', '==', selectedMaster.id)
+            .where('authorId', '==', currentUser.id)
+            .get();
+            
+        if (!existing.empty) {
+            showNotification('Вы уже оставляли отзыв этому мастеру', 'warning');
+            return;
         }
         
-        const totalRating = reviews.reduce((sum, review) => sum + (parseFloat(review.rating) || 0), 0);
-        const averageRating = Math.round((totalRating / reviews.length) * 10) / 10;
+        const reviewData = {
+            authorId: currentUser.id,
+            authorName: currentUser.name || currentUser.email.split('@')[0],
+            authorImage: getSafeImageUrl('avatar', currentUser.name),
+            text: text,
+            rating: rating,
+            masterId: selectedMaster.id,
+            masterName: selectedMaster.name,
+            date: firebase.firestore.FieldValue.serverTimestamp()
+        };
         
-        await db.collection('salons').doc(salonId).update({
-            rating: averageRating,
-            reviewCount: reviews.length,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        await db.collection('master_reviews').add(reviewData);
+        await updateMasterRating(selectedMaster.id);
         
-        return averageRating;
+        document.getElementById('master-review-text').value = '';
+        selectedMasterRating = 0;
+        updateMasterRatingDisplay();
+        
+        showNotification('Отзыв опубликован');
+        await loadMasterPage(selectedMaster.id);
+        clearCache();
     } catch (error) {
-        console.error('Ошибка обновления рейтинга салона:', error);
-        showNotification('Ошибка при обновлении рейтинга салона', 'error');
+        console.error('Ошибка отправки отзыва:', error);
+        showNotification('Ошибка при публикации', 'error');
+    }
+}
+
+function updateMasterRatingDisplay() {
+    const stars = document.querySelectorAll('#master-review-stars i');
+    const ratingText = document.getElementById('master-selected-rating-text');
+    if (!stars.length || !ratingText) return;
+    
+    stars.forEach((star, index) => {
+        star.className = index < selectedMasterRating ? 'fas fa-star active' : 'far fa-star';
+    });
+    
+    ratingText.textContent = selectedMasterRating > 0 ? `${selectedMasterRating} звезд` : '0 звёзд';
+}
+
+async function updateMasterRating(masterId) {
+    try {
+        const reviews = await getMasterReviews(masterId);
+        const rating = reviews.length
+            ? Math.round((reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length) * 10) / 10
+            : 0;
+        await db.collection('masters').doc(masterId).update({ rating: rating, reviewCount: reviews.length });
+        return rating;
+    } catch (error) {
+        console.error('Ошибка обновления рейтинга:', error);
         return 0;
     }
 }
 
 // ==============================================
-// ФУНКЦИЯ ОТПРАВКИ ОТЗЫВА (О САЛОНЕ)
+// ОТЗЫВЫ О САЛОНАХ
 // ==============================================
 async function submitReview() {
     if (!currentUser) {
-        showNotification('Только авторизованные пользователи могут оставлять отзывы', 'error');
+        showNotification('Авторизуйтесь, чтобы оставить отзыв', 'error');
         showModal('profile-modal');
         return;
     }
@@ -2073,21 +3291,20 @@ async function submitReview() {
         return;
     }
     
-    const reviewTextInput = document.getElementById('review-text');
-    if (!reviewTextInput) return;
-    
-    const reviewText = reviewTextInput.value.trim();
+    const reviewText = document.getElementById('review-text')?.value.trim() || '';
     
     if (selectedRating === 0) {
-        showNotification('Пожалуйста, оцените салон', 'error');
+        showNotification('Оцените салон', 'error');
         return;
     }
     
     try {
-        const existingReviews = await getReviews({ salonId: currentSalon.id });
-        const userExistingReview = existingReviews.find(review => review.authorId === currentUser.id);
-        
-        if (userExistingReview) {
+        const existing = await db.collection('reviews')
+            .where('salonId', '==', currentSalon.id)
+            .where('authorId', '==', currentUser.id)
+            .get();
+            
+        if (!existing.empty) {
             showNotification('Вы уже оставляли отзыв для этого салона', 'warning');
             return;
         }
@@ -2103,836 +3320,157 @@ async function submitReview() {
             date: firebase.firestore.FieldValue.serverTimestamp()
         };
         
-        const reviewRef = await db.collection('reviews').add(reviewData);
+        await db.collection('reviews').add(reviewData);
+        await updateSalonRating(currentSalon.id);
         
-        await logAction('review', 'review', reviewRef.id, {
-            salonId: currentSalon.id,
-            salonName: currentSalon.name,
-            rating: selectedRating
-        }, currentSalon.name);
-        
-        const newRating = await updateSalonRating(currentSalon.id);
-        
-        reviewTextInput.value = '';
+        document.getElementById('review-text').value = '';
         selectedRating = 0;
         updateRatingDisplay();
         
-        showNotification('Отзыв успешно опубликован!');
-        
+        showNotification('Отзыв опубликован');
         await loadSalonReviews();
-        
-        if (document.getElementById('home-page').classList.contains('active')) {
-            await loadSalonsWithFilters();
-            await loadRecommendations();
-            await loadReviews();
-        }
-        
-        if (document.getElementById('admin-page').classList.contains('active') && currentUser.role === 'admin') {
-            await loadReviewsManagement();
-        }
+        clearCache();
     } catch (error) {
         console.error('Ошибка отправки отзыва:', error);
-        showNotification('Ошибка при публикации отзыва', 'error');
+        showNotification('Ошибка при публикации', 'error');
+    }
+}
+
+function updateRatingDisplay() {
+    const stars = document.querySelectorAll('#review-stars i');
+    const ratingText = document.getElementById('selected-rating-text');
+    if (!stars.length || !ratingText) return;
+    
+    stars.forEach((star, index) => {
+        star.className = index < selectedRating ? 'fas fa-star active' : 'far fa-star';
+    });
+    
+    ratingText.textContent = selectedRating > 0 ? `${selectedRating} звезд` : '0 звёзд';
+}
+
+async function updateSalonRating(salonId) {
+    try {
+        const reviews = await getReviews({ salonId: salonId });
+        
+        if (reviews.length === 0) {
+            await db.collection('salons').doc(salonId).update({ rating: 0, reviewCount: 0 });
+            return 0;
+        }
+        
+        const totalRating = reviews.reduce((sum, review) => sum + (parseFloat(review.rating) || 0), 0);
+        const averageRating = Math.round((totalRating / reviews.length) * 10) / 10;
+        
+        await db.collection('salons').doc(salonId).update({ rating: averageRating, reviewCount: reviews.length });
+        return averageRating;
+    } catch (error) {
+        console.error('Ошибка обновления рейтинга:', error);
+        return 0;
+    }
+}
+
+async function loadSalonReviews() {
+    if (!currentSalon) return;
+    
+    const reviewsEl = document.getElementById('salon-reviews-list');
+    if (!reviewsEl) return;
+    
+    const reviews = await getReviews({ salonId: currentSalon.id });
+    
+    reviewsEl.innerHTML = '';
+    if (reviews.length === 0) {
+        reviewsEl.innerHTML = '<div class="no-results">Отзывов пока нет</div>';
+    } else {
+        reviews.forEach(review => {
+            const reviewItem = document.createElement('div');
+            reviewItem.className = 'review-item';
+            reviewItem.innerHTML = `
+                <div class="review-header">
+                    <img src="${review.authorImage || getSafeImageUrl('avatar', review.authorName)}" class="review-author-img">
+                    <div>
+                        <div class="review-author">${review.authorName || 'Аноним'}</div>
+                        <div class="review-date">${formatDate(review.date)}</div>
+                    </div>
+                </div>
+                <div class="review-rating-stars">${renderStars(review.rating || 0)}</div>
+                ${review.text ? `<div class="review-text">${review.text}</div>` : ''}
+            `;
+            reviewsEl.appendChild(reviewItem);
+        });
     }
 }
 
 // ==============================================
-// ФУНКЦИЯ УДАЛЕНИЯ ОТЗЫВА (О САЛОНЕ)
+// УПРАВЛЕНИЕ ОТЗЫВАМИ В АДМИН-ПАНЕЛИ
 // ==============================================
+async function populateSalonFilterForReviews() {
+    const select = document.getElementById('review-salon-filter');
+    if (!select) return;
+    
+    const salons = await getCachedData('salons');
+    select.innerHTML = '<option value="all">Все салоны</option>';
+    salons.forEach(salon => {
+        const option = document.createElement('option');
+        option.value = salon.id;
+        option.textContent = salon.name;
+        select.appendChild(option);
+    });
+}
+
+async function loadReviewsManagement() {
+    const tableBody = document.getElementById('reviews-management-table');
+    if (!tableBody) return;
+    
+    const filterSelect = document.getElementById('review-salon-filter');
+    const selectedSalonId = filterSelect ? filterSelect.value : 'all';
+    
+    let reviews;
+    if (selectedSalonId === 'all') {
+        reviews = await getCachedData('reviews');
+    } else {
+        reviews = await getReviews({ salonId: selectedSalonId });
+    }
+    
+    const salons = await getCachedData('salons');
+    const salonMap = Object.fromEntries(salons.map(s => [s.id, s.name]));
+    
+    tableBody.innerHTML = '';
+    reviews.forEach(review => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${review.authorName || 'Аноним'}</td>
+            <td>${salonMap[review.salonId] || 'Неизвестно'}</td>
+            <td>${renderStars(review.rating || 0)} ${review.rating || 0}</td>
+            <td>${review.text ? review.text.substring(0, 100) + (review.text.length > 100 ? '...' : '') : 'Нет текста'}</td>
+            <td>${formatDate(review.date)}</td>
+            <td><button class="action-btn delete" onclick="deleteReview('${review.id}')">Удалить</button></td>
+        `;
+        tableBody.appendChild(row);
+    });
+}
+
 async function deleteReview(reviewId) {
-    if (!confirm('Вы уверены, что хотите удалить этот отзыв?')) return;
+    if (!confirm('Удалить отзыв?')) return;
     
     try {
         const reviewDoc = await db.collection('reviews').doc(reviewId).get();
-        if (!reviewDoc.exists) {
-            showNotification('Отзыв не найден', 'error');
-            return;
-        }
-        
-        const reviewData = reviewDoc.data();
-        const salonId = reviewData.salonId;
-        const salonName = reviewData.salonName;
+        const reviewData = reviewDoc.exists ? reviewDoc.data() : null;
         
         await db.collection('reviews').doc(reviewId).delete();
+        await logAction('delete', 'review', reviewId, { originalData: reviewData }, 'Отзыв удален');
         
-        await logAction('delete', 'review', reviewId, { originalData: reviewData }, salonName);
+        if (reviewData?.salonId) await updateSalonRating(reviewData.salonId);
         
-        if (salonId) await updateSalonRating(salonId);
-        
-        showNotification('Отзыв успешно удален');
-        
-        if (document.getElementById('reviews-management-table')) await loadReviewsManagement();
-        if (currentSalon && currentSalon.id === salonId) await loadSalonReviews();
-        
-        if (document.getElementById('home-page').classList.contains('active')) {
-            await loadReviews();
-            await loadSalonsWithFilters();
-        }
+        showNotification('Отзыв удален');
+        loadReviewsManagement();
+        clearCache();
     } catch (error) {
         console.error('Ошибка удаления отзыва:', error);
-        showNotification('Ошибка при удалении отзыва', 'error');
+        showNotification('Ошибка при удалении', 'error');
     }
 }
 
 // ==============================================
-// ФУНКЦИИ РЕДАКТИРОВАНИЯ
-// ==============================================
-async function editSalon(salonId) {
-    editingSalonId = salonId;
-    
-    try {
-        const salonDoc = await db.collection('salons').doc(salonId).get();
-        if (salonDoc.exists) {
-            const salon = salonDoc.data();
-            
-            document.getElementById('salon-name').value = salon.name || '';
-            document.getElementById('salon-address').value = salon.address || '';
-            document.getElementById('salon-district').value = salon.district || 'center';
-            document.getElementById('salon-description').value = salon.description || '';
-            
-            document.querySelectorAll('input[name="specialization"]').forEach(cb => cb.checked = false);
-            if (salon.specializations && Array.isArray(salon.specializations)) {
-                salon.specializations.forEach(spec => {
-                    const checkbox = document.querySelector(`input[name="specialization"][value="${spec}"]`);
-                    if (checkbox) checkbox.checked = true;
-                });
-            }
-            
-            const urlInput = document.getElementById('salon-image-url');
-            if (urlInput) urlInput.value = salon.imageUrl || '';
-            
-            const fileInput = document.getElementById('salon-image-upload');
-            if (fileInput) fileInput.value = '';
-            
-            const previewDiv = document.getElementById('salon-image-preview');
-            if (previewDiv) {
-                previewDiv.innerHTML = salon.imageUrl ? `<img src="${salon.imageUrl}" style="max-width: 200px; max-height: 200px;">` : '';
-            }
-            
-            document.getElementById('salon-modal-title').textContent = 'Редактировать салон';
-            showModal('add-salon-modal');
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки салона для редактирования:', error);
-        showNotification('Ошибка загрузки данных салона', 'error');
-    }
-}
-
-async function editService(serviceId) {
-    editingServiceId = serviceId;
-    
-    try {
-        const serviceDoc = await db.collection('services').doc(serviceId).get();
-        if (serviceDoc.exists) {
-            const service = serviceDoc.data();
-            
-            document.getElementById('service-name').value = service.name || '';
-            document.getElementById('service-category').value = service.category || 'hair';
-            document.getElementById('service-price').value = service.price || '';
-            document.getElementById('service-duration').value = service.duration || 60;
-            
-            await loadSelectOptions();
-            
-            if (service.salonId) document.getElementById('service-salon').value = service.salonId;
-            
-            const urlInput = document.getElementById('service-image-url');
-            if (urlInput) urlInput.value = service.imageUrl || '';
-            
-            const fileInput = document.getElementById('service-image-upload');
-            if (fileInput) fileInput.value = '';
-            
-            const previewDiv = document.getElementById('service-image-preview');
-            if (previewDiv) {
-                previewDiv.innerHTML = service.imageUrl ? `<img src="${service.imageUrl}" style="max-width: 200px; max-height: 200px;">` : '';
-            }
-            
-            document.getElementById('service-modal-title').textContent = 'Редактировать услугу';
-            showModal('add-service-modal');
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки услуги для редактирования:', error);
-        showNotification('Ошибка загрузки данных услуги', 'error');
-    }
-}
-
-async function editMaster(masterId) {
-    editingMasterId = masterId;
-    
-    try {
-        const masterDoc = await db.collection('masters').doc(masterId).get();
-        if (masterDoc.exists) {
-            const master = masterDoc.data();
-            
-            document.getElementById('master-name').value = master.name || '';
-            
-            const specializationElement = document.getElementById('master-specialization');
-            if (specializationElement && specializationElement.tagName === 'INPUT') {
-                const select = document.createElement('select');
-                select.id = 'master-specialization';
-                select.className = 'form-input';
-                select.innerHTML = `
-                    <option value="">Выберите специализацию</option>
-                    <option value="Парикмахер">Парикмахер</option>
-                    <option value="Мастер маникюра">Мастер маникюра</option>
-                    <option value="Косметолог">Косметолог</option>
-                    <option value="Массажист">Массажист</option>
-                    <option value="Барбер">Барбер</option>
-                    <option value="Визажист">Визажист</option>
-                    <option value="Бровист">Бровист</option>
-                    <option value="Лешмейкер">Лешмейкер</option>
-                    <option value="Эстетист">Эстетист</option>
-                    <option value="Подолог">Подолог</option>
-                `;
-                
-                specializationElement.parentNode.replaceChild(select, specializationElement);
-                
-                const newSelect = document.getElementById('master-specialization');
-                if (newSelect && master.specialization) newSelect.value = master.specialization;
-            } else {
-                document.getElementById('master-specialization').value = master.specialization || '';
-            }
-            
-            document.getElementById('master-price').value = master.price || '';
-            
-            await loadSelectOptions();
-            
-            if (master.salonId) document.getElementById('master-salon').value = master.salonId;
-            
-            document.getElementById('master-email').style.display = 'none';
-            document.getElementById('master-password').style.display = 'none';
-            document.querySelector('label[for="master-email"]').style.display = 'none';
-            document.querySelector('label[for="master-password"]').style.display = 'none';
-            
-            const urlInput = document.getElementById('master-image-url');
-            if (urlInput) urlInput.value = master.imageUrl || '';
-            
-            const fileInput = document.getElementById('master-image-upload');
-            if (fileInput) fileInput.value = '';
-            
-            const previewDiv = document.getElementById('master-image-preview');
-            if (previewDiv) {
-                previewDiv.innerHTML = master.imageUrl ? `<img src="${master.imageUrl}" style="max-width: 200px; max-height: 200px;">` : '';
-            }
-            
-            document.getElementById('master-modal-title').textContent = 'Редактировать мастера';
-            showModal('add-master-modal');
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки мастера для редактирования:', error);
-        showNotification('Ошибка загрузки данных мастера', 'error');
-    }
-}
-
-// ==============================================
-// ФУНКЦИИ СОХРАНЕНИЯ
-// ==============================================
-async function addSalon() {
-    const name = document.getElementById('salon-name').value.trim();
-    const address = document.getElementById('salon-address').value.trim();
-    const description = document.getElementById('salon-description').value.trim();
-    
-    if (!name || !address) {
-        showNotification('Пожалуйста, заполните обязательные поля', 'error');
-        return;
-    }
-    
-    const fileInput = document.getElementById('salon-image-upload');
-    const urlInput = document.getElementById('salon-image-url');
-    let imageUrl = null;
-    
-    const saveBtn = document.getElementById('save-salon');
-    saveBtn.disabled = true;
-    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Загрузка...';
-    
-    try {
-        if (fileInput.files.length > 0) {
-            imageUrl = await uploadImage(fileInput.files[0], 'salons');
-        } else if (urlInput.value.trim()) {
-            imageUrl = urlInput.value.trim();
-        }
-        
-        const specializations = [];
-        document.querySelectorAll('input[name="specialization"]:checked').forEach(cb => specializations.push(cb.value));
-        
-        const salonData = {
-            name: name,
-            address: address,
-            district: document.getElementById('salon-district').value,
-            description: description,
-            specializations: specializations,
-            ...(imageUrl && { imageUrl: imageUrl }),
-            rating: 0,
-            reviewCount: 0,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        
-        if (editingSalonId) {
-            if (imageUrl === null) delete salonData.imageUrl;
-            
-            const originalSalon = await db.collection('salons').doc(editingSalonId).get();
-            
-            await db.collection('salons').doc(editingSalonId).update(salonData);
-            
-            await logAction('update', 'salon', editingSalonId, {
-                name: name,
-                fields: Object.keys(salonData),
-                originalData: originalSalon.exists ? originalSalon.data() : null
-            }, name);
-            
-            showNotification('Салон успешно обновлен');
-            
-            if (currentSalon && currentSalon.id === editingSalonId) {
-                currentSalon = { id: editingSalonId, ...salonData };
-            }
-        } else {
-            salonData.averagePrice = 2500;
-            salonData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-            
-            const newSalonRef = await db.collection('salons').add(salonData);
-            
-            await logAction('create', 'salon', newSalonRef.id, { name: name }, name);
-            
-            showNotification('Салон успешно добавлен');
-        }
-        
-        hideModal('add-salon-modal');
-        updateAdminTables();
-        loadAdminStats();
-        
-        editingSalonId = null;
-        resetSalonForm();
-    } catch (error) {
-        console.error('Ошибка сохранения салона:', error);
-        showNotification('Ошибка при сохранении салона', 'error');
-    } finally {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = 'Сохранить';
-    }
-}
-
-async function addService() {
-    const name = document.getElementById('service-name').value.trim();
-    const price = document.getElementById('service-price').value.trim();
-    const salonId = document.getElementById('service-salon').value;
-    
-    if (!name || !price || !salonId) {
-        showNotification('Пожалуйста, заполните все обязательные поля', 'error');
-        return;
-    }
-    
-    const fileInput = document.getElementById('service-image-upload');
-    const urlInput = document.getElementById('service-image-url');
-    let imageUrl = null;
-    
-    const saveBtn = document.getElementById('save-service');
-    saveBtn.disabled = true;
-    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Загрузка...';
-    
-    try {
-        if (fileInput.files.length > 0) {
-            imageUrl = await uploadImage(fileInput.files[0], 'services');
-        } else if (urlInput.value.trim()) {
-            imageUrl = urlInput.value.trim();
-        }
-        
-        const salonDoc = await db.collection('salons').doc(salonId).get();
-        if (!salonDoc.exists) {
-            showNotification('Выбранный салон не найден', 'error');
-            return;
-        }
-        
-        const salon = salonDoc.data();
-        
-        const serviceData = {
-            name: name,
-            category: document.getElementById('service-category').value,
-            price: parseInt(price),
-            duration: parseInt(document.getElementById('service-duration').value) || 60,
-            salonId: salonId,
-            salonName: salon.name,
-            ...(imageUrl && { imageUrl: imageUrl }),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        
-        if (editingServiceId) {
-            if (imageUrl === null) delete serviceData.imageUrl;
-            
-            const originalService = await db.collection('services').doc(editingServiceId).get();
-            
-            await db.collection('services').doc(editingServiceId).update(serviceData);
-            
-            await logAction('update', 'service', editingServiceId, {
-                name: name,
-                salonId: salonId,
-                originalData: originalService.exists ? originalService.data() : null
-            }, name);
-            
-            showNotification('Услуга успешно обновлена');
-        } else {
-            serviceData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-            await db.collection('services').add(serviceData);
-            
-            await logAction('create', 'service', 'new', { name: name, salonId: salonId }, name);
-            
-            showNotification('Услуга успешно добавлена');
-        }
-        
-        hideModal('add-service-modal');
-        updateAdminTables();
-        loadAdminStats();
-        
-        editingServiceId = null;
-        resetServiceForm();
-    } catch (error) {
-        console.error('Ошибка сохранения услуги:', error);
-        showNotification('Ошибка при сохранении услуги', 'error');
-    } finally {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = 'Сохранить';
-    }
-}
-
-async function addMaster() {
-    const name = document.getElementById('master-name').value.trim();
-    const specializationElement = document.getElementById('master-specialization');
-    const specialization = specializationElement.tagName === 'SELECT' ? specializationElement.value : specializationElement.value.trim();
-    const price = document.getElementById('master-price').value.trim();
-    const salonId = document.getElementById('master-salon').value;
-    const email = document.getElementById('master-email').value.trim();
-    const password = document.getElementById('master-password').value.trim();
-    
-    if (!name || !specialization || !price || !salonId) {
-        showNotification('Пожалуйста, заполните все обязательные поля', 'error');
-        return;
-    }
-    
-    if (!editingMasterId && (!email || !password)) {
-        showNotification('При добавлении нового мастера необходимо указать email и пароль', 'error');
-        return;
-    }
-    
-    if (!editingMasterId && password.length < 6) {
-        showNotification('Пароль должен содержать минимум 6 символов', 'error');
-        return;
-    }
-    
-    const fileInput = document.getElementById('master-image-upload');
-    const urlInput = document.getElementById('master-image-url');
-    let imageUrl = null;
-    
-    const saveBtn = document.getElementById('save-master');
-    saveBtn.disabled = true;
-    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Загрузка...';
-    
-    try {
-        if (fileInput.files.length > 0) {
-            imageUrl = await uploadImage(fileInput.files[0], 'masters');
-        } else if (urlInput.value.trim()) {
-            imageUrl = urlInput.value.trim();
-        }
-        
-        const salonDoc = await db.collection('salons').doc(salonId).get();
-        const salon = salonDoc.exists ? salonDoc.data() : { name: 'Неизвестный салон' };
-        
-        const masterData = {
-            name: name,
-            specialization: specialization,
-            price: parseInt(price),
-            salonId: salonId,
-            salonName: salon.name,
-            ...(imageUrl && { imageUrl: imageUrl }),
-            rating: 0,
-            reviewCount: 0,
-            daysOff: [],
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        
-        if (editingMasterId) {
-            if (imageUrl === null) delete masterData.imageUrl;
-            
-            const originalMaster = await db.collection('masters').doc(editingMasterId).get();
-            
-            await db.collection('masters').doc(editingMasterId).update(masterData);
-            
-            await logAction('update', 'master', editingMasterId, {
-                name: name,
-                originalData: originalMaster.exists ? originalMaster.data() : null
-            }, name);
-            
-            showNotification('Мастер успешно обновлен');
-        } else {
-            const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-            const user = userCredential.user;
-            
-            const userData = {
-                email: email,
-                name: name.split(' ')[0] || name,
-                lastname: name.split(' ')[1] || '',
-                phone: '',
-                role: 'master',
-                isAdmin: false,
-                registrationDate: firebase.firestore.FieldValue.serverTimestamp(),
-                bookings: []
-            };
-            
-            await db.collection('users').doc(user.uid).set(userData);
-            
-            masterData.userId = user.uid;
-            masterData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-            
-            await db.collection('masters').add(masterData);
-            
-            await logAction('create', 'master', 'new', { name: name, email: email }, name);
-            await logAction('create', 'user', user.uid, { role: 'master' }, `${userData.name} ${userData.lastname}`);
-            
-            showNotification('Мастер успешно добавлен');
-        }
-        
-        hideModal('add-master-modal');
-        updateAdminTables();
-        loadAdminStats();
-        
-        editingMasterId = null;
-        resetMasterForm();
-    } catch (error) {
-        console.error('Ошибка сохранения мастера:', error);
-        if (error.code === 'auth/email-already-in-use') {
-            showNotification('Пользователь с таким email уже существует', 'error');
-        } else {
-            showNotification('Ошибка при сохранении мастера', 'error');
-        }
-    } finally {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = 'Сохранить';
-    }
-}
-
-// ==============================================
-// УДАЛЕНИЕ
-// ==============================================
-async function deleteSalon(salonId) {
-    if (!confirm('Вы уверены, что хотите удалить этот салон? Все связанные услуги и мастера также будут удалены.')) return;
-    
-    try {
-        const salonDoc = await db.collection('salons').doc(salonId).get();
-        const salonData = salonDoc.exists ? salonDoc.data() : null;
-        
-        await db.collection('salons').doc(salonId).delete();
-        
-        const servicesSnapshot = await db.collection('services').where('salonId', '==', salonId).get();
-        const serviceBatch = db.batch();
-        servicesSnapshot.docs.forEach(doc => serviceBatch.delete(doc.ref));
-        await serviceBatch.commit();
-        
-        const mastersSnapshot = await db.collection('masters').where('salonId', '==', salonId).get();
-        const masterBatch = db.batch();
-        mastersSnapshot.docs.forEach(doc => masterBatch.delete(doc.ref));
-        await masterBatch.commit();
-        
-        await logAction('delete', 'salon', salonId, { originalData: salonData }, 'Салон удален');
-        
-        showNotification('Салон и все связанные данные удалены');
-        
-        updateAdminTables();
-        loadAdminStats();
-    } catch (error) {
-        console.error('Ошибка удаления салона:', error);
-        showNotification('Ошибка при удалении салона', 'error');
-    }
-}
-
-async function deleteService(serviceId) {
-    if (!confirm('Вы уверены, что хотите удалить эту услугу?')) return;
-    
-    try {
-        const serviceDoc = await db.collection('services').doc(serviceId).get();
-        const serviceData = serviceDoc.exists ? serviceDoc.data() : null;
-        const serviceName = serviceDoc.exists ? serviceDoc.data().name : 'Неизвестная услуга';
-        
-        await db.collection('services').doc(serviceId).delete();
-        
-        await logAction('delete', 'service', serviceId, { originalData: serviceData }, serviceName);
-        
-        showNotification('Услуга успешно удалена');
-        
-        updateAdminTables();
-        loadAdminStats();
-    } catch (error) {
-        console.error('Ошибка удаления услуги:', error);
-        showNotification('Ошибка при удалении услуги', 'error');
-    }
-}
-
-async function deleteMaster(masterId) {
-    if (!confirm('Вы уверены, что хотите удалить этого мастера? Это действие нельзя отменить.')) return;
-    
-    try {
-        const masterDoc = await db.collection('masters').doc(masterId).get();
-        const originalData = masterDoc.exists ? masterDoc.data() : null;
-        const masterName = originalData ? originalData.name : 'Неизвестный мастер';
-        
-        await db.collection('masters').doc(masterId).delete();
-        
-        if (originalData && originalData.userId) {
-            try {
-                await db.collection('users').doc(originalData.userId).delete();
-            } catch (error) {
-                console.error('Ошибка удаления пользователя мастера:', error);
-            }
-        }
-        
-        await logAction('delete', 'master', masterId, { originalData }, masterName);
-        
-        showNotification('Мастер успешно удален');
-        
-        updateAdminTables();
-        loadAdminStats();
-    } catch (error) {
-        console.error('Ошибка удаления мастера:', error);
-        showNotification('Ошибка при удалении мастера', 'error');
-    }
-}
-
-async function deleteUser(userId) {
-    if (!confirm('Вы уверены, что хотите удалить этого пользователя? Это действие нельзя отменить.')) return;
-    
-    try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        const originalData = userDoc.exists ? userDoc.data() : null;
-        
-        await db.collection('users').doc(userId).delete();
-        
-        const masters = await getMasters({ userId: userId });
-        for (const master of masters) {
-            await db.collection('masters').doc(master.id).delete();
-        }
-        
-        await logAction('delete', 'user', userId, { originalData }, 'Пользователь удален');
-        
-        showNotification('Пользователь успешно удален');
-        
-        updateAdminTables();
-        loadAdminStats();
-    } catch (error) {
-        console.error('Ошибка удаления пользователя:', error);
-        showNotification('Ошибка при удалении пользователя', 'error');
-    }
-}
-
-// ==============================================
-// АДМИН-ПАНЕЛЬ С РАЗДЕЛЕНИЕМ ПРАВ
-// ==============================================
-function setupAdminPage() {
-    if (!currentUser) {
-        document.getElementById('admin-page').innerHTML = `
-            <div class="container">
-                <h1 class="page-title">Доступ запрещен</h1>
-                <p>Только администраторы и мастера могут просматривать эту страницу.</p>
-            </div>
-        `;
-        return;
-    }
-    
-    const isAdmin = currentUser.role === 'admin';
-    const isMaster = currentUser.role === 'master';
-    
-    const titleElement = document.getElementById('admin-page-title');
-    if (titleElement) {
-        if (isAdmin) titleElement.textContent = 'Админ-панель';
-        else if (isMaster) titleElement.textContent = 'Мастер-панель';
-    }
-    
-    if (isAdmin) {
-        const switcher = document.getElementById('admin-mode-switcher');
-        if (switcher) {
-            switcher.innerHTML = `
-                <button class="mode-btn active" data-mode="admin">Режим администратора</button>
-                <button class="mode-btn" data-mode="actions-history">История действий</button>
-                <button class="mode-btn" data-mode="reviews-management">Управление отзывами</button>
-                <button class="mode-btn" data-mode="users-management">Управление пользователями</button>
-            `;
-        }
-        
-        document.getElementById('admin-mode').style.display = 'block';
-        document.getElementById('actions-history-mode').style.display = 'none';
-        document.getElementById('reviews-management-mode').style.display = 'none';
-        document.getElementById('users-management-mode').style.display = 'none';
-        document.getElementById('master-mode').style.display = 'none';
-        
-        updateAdminTables();
-        loadSelectOptions();
-        loadAdminStats();
-        
-        populateSalonFilterForReviews();
-    } else if (isMaster) {
-        const switcher = document.getElementById('admin-mode-switcher');
-        if (switcher) {
-            switcher.innerHTML = `
-                <button class="mode-btn active" data-mode="master-bookings">Управление записями</button>
-                <button class="mode-btn" data-mode="master-actions-history">Мои действия</button>
-            `;
-        }
-        
-        document.getElementById('admin-mode').style.display = 'none';
-        document.getElementById('actions-history-mode').style.display = 'none';
-        document.getElementById('reviews-management-mode').style.display = 'none';
-        document.getElementById('users-management-mode').style.display = 'none';
-        document.getElementById('master-mode').style.display = 'block';
-        document.getElementById('master-bookings-mode').style.display = 'block';
-        document.getElementById('master-actions-history-mode').style.display = 'none';
-        
-        setupMasterPanel();
-    } else {
-        document.getElementById('admin-page').innerHTML = `
-            <div class="container">
-                <h1 class="page-title">Доступ запрещен</h1>
-                <p>Только администраторы и мастера могут просматривать эту страницу.</p>
-            </div>
-        `;
-    }
-}
-
-async function updateAdminTables() {
-    const salons = await getSalons();
-    const services = await getServices();
-    const masters = await getMasters();
-    const users = await getUsers();
-    const bookings = await getBookings();
-    
-    const salonsTableBody = document.getElementById('salons-table-body');
-    if (salonsTableBody) {
-        salonsTableBody.innerHTML = '';
-        
-        salons.forEach(salon => {
-            const row = document.createElement('tr');
-            
-            row.innerHTML = `
-                <td>${salon.name}</td>
-                <td>${salon.address || 'Не указан'}</td>
-                <td>${renderStars(salon.rating || 0)} ${(salon.rating || 0).toFixed(1)}</td>
-                <td>
-                    <button class="action-btn edit" onclick="editSalon('${salon.id}')">Изменить</button>
-                    <button class="action-btn delete" onclick="deleteSalon('${salon.id}')">Удалить</button>
-                </td>
-            `;
-            
-            salonsTableBody.appendChild(row);
-        });
-    }
-    
-    const servicesTableBody = document.getElementById('services-table-body');
-    if (servicesTableBody) {
-        servicesTableBody.innerHTML = '';
-        
-        const salonMap = {};
-        salons.forEach(salon => salonMap[salon.id] = salon.name);
-        
-        services.forEach(service => {
-            const row = document.createElement('tr');
-            
-            row.innerHTML = `
-                <td>${service.name}</td>
-                <td>${getCategoryName(service.category)}</td>
-                <td>${service.price || 0} ₽</td>
-                <td>${salonMap[service.salonId] || 'Неизвестно'}</td>
-                <td>
-                    <button class="action-btn edit" onclick="editService('${service.id}')">Изменить</button>
-                    <button class="action-btn delete" onclick="deleteService('${service.id}')">Удалить</button>
-                </td>
-            `;
-            
-            servicesTableBody.appendChild(row);
-        });
-    }
-    
-    const mastersTableBody = document.getElementById('masters-table-body');
-    if (mastersTableBody) {
-        mastersTableBody.innerHTML = '';
-        
-        const salonMap = {};
-        salons.forEach(salon => salonMap[salon.id] = salon.name);
-        
-        masters.forEach(master => {
-            const row = document.createElement('tr');
-            
-            row.innerHTML = `
-                <td>${master.name}</td>
-                <td>${master.specialization || 'Не указана'}</td>
-                <td>${master.price || 0} ₽</td>
-                <td>${salonMap[master.salonId] || 'Неизвестно'}</td>
-                <td>
-                    <button class="action-btn edit" onclick="editMaster('${master.id}')">Изменить</button>
-                    <button class="action-btn delete" onclick="deleteMaster('${master.id}')">Удалить</button>
-                </td>
-            `;
-            
-            mastersTableBody.appendChild(row);
-        });
-    }
-    
-    const usersTableBody = document.getElementById('users-table-body');
-    if (usersTableBody) {
-        usersTableBody.innerHTML = '';
-        
-        users.forEach(user => {
-            const row = document.createElement('tr');
-            
-            row.innerHTML = `
-                <td>${user.name || ''} ${user.lastname || ''}</td>
-                <td>${user.email || ''}</td>
-                <td>${getRoleName(user.role)}${user.isAdmin ? ' (админ)' : ''}</td>
-                <td>${user.phone || 'Не указан'}</td>
-                <td>${formatDate(user.registrationDate)}</td>
-                <td>
-                    <button class="action-btn edit" onclick="editUser('${user.id}')">Изменить</button>
-                    <button class="action-btn delete" onclick="deleteUser('${user.id}')">Удалить</button>
-                </td>
-            `;
-            
-            usersTableBody.appendChild(row);
-        });
-    }
-    
-    const bookingsTableBody = document.getElementById('bookings-table-body');
-    if (bookingsTableBody) {
-        bookingsTableBody.innerHTML = '';
-        
-        bookings.forEach(booking => {
-            const row = document.createElement('tr');
-            
-            row.innerHTML = `
-                <td>${booking.clientName || ''} ${booking.clientLastname || ''}</td>
-                <td>${booking.serviceName || 'Неизвестно'}</td>
-                <td>${booking.masterName || 'Неизвестно'}</td>
-                <td>${formatDate(booking.date)}</td>
-                <td>${booking.time || 'Не указано'}</td>
-                <td><span class="booking-status ${getStatusClass(booking.status)}">${booking.status || 'Неизвестно'}</span></td>
-                <td>
-                    ${(booking.status === 'Подтверждена' || !booking.status) ? `
-                        <button class="action-btn complete" onclick="updateBookingStatus('${booking.id}', 'Выполнено')">Выполнено</button>
-                        <button class="action-btn cancel" onclick="updateBookingStatus('${booking.id}', 'Отменено')">Отмена</button>
-                    ` : ''}
-                </td>
-            `;
-            
-            bookingsTableBody.appendChild(row);
-        });
-    }
-}
-
-function getStatusClass(status) {
-    const statuses = {
-        'Подтверждена': 'confirmed',
-        'Выполнено': 'completed',
-        'Отменено': 'cancelled',
-        'Перенесено': 'rescheduled'
-    };
-    
-    return statuses[status] || '';
-}
-
-// ==============================================
-// ФУНКЦИИ ИСТОРИИ ДЕЙСТВИЙ
+// ИСТОРИЯ ДЕЙСТВИЙ
 // ==============================================
 async function loadActionsHistory() {
     const userType = document.getElementById('history-user-type')?.value || 'all';
@@ -2943,17 +3481,14 @@ async function loadActionsHistory() {
     if (actionType !== 'all') filters.actionType = actionType;
     
     const actions = await getActionsHistory(filters);
-    
     const tableBody = document.getElementById('actions-history-table');
     if (!tableBody) return;
     
     tableBody.innerHTML = '';
-    
     actions.forEach(action => {
-        const canUndo = action.status === 'completed' && currentUser.role === 'admin' && action.actionType !== 'booking';
+        const canUndo = action.status === 'completed' && currentUser?.role === 'admin' && action.actionType !== 'booking';
         
         const row = document.createElement('tr');
-        
         row.innerHTML = `
             <td>${formatDateTime(action.timestamp)}</td>
             <td>${action.userName || 'Неизвестно'} (${action.userRole || 'неизвестно'})</td>
@@ -2961,7 +3496,6 @@ async function loadActionsHistory() {
             <td>${getObjectDescription(action)}</td>
             <td>${canUndo ? `<button class="action-btn undo" onclick="undoAction('${action.id}')">Отменить</button>` : action.status === 'undone' ? 'Отменено' : '-'}</td>
         `;
-        
         tableBody.appendChild(row);
     });
 }
@@ -2976,83 +3510,43 @@ function getActionDescription(action) {
         'user_update': 'Изменение профиля',
         'master_transfer': 'Перевод мастера'
     };
-    
-    return actions[action.actionType] || action.actionType || 'Неизвестное действие';
+    return actions[action.actionType] || action.actionType;
 }
 
 function getObjectDescription(action) {
     const objectType = action.objectType || '';
     const objectName = action.objectName || action.objectId || '';
-    const details = action.details || {};
     
-    switch(objectType) {
-        case 'salon':
-            if (action.actionType === 'update' && details.fields) {
-                const fieldNames = {
-                    'name': 'название',
-                    'address': 'адрес',
-                    'description': 'описание',
-                    'specializations': 'специализации',
-                    'imageUrl': 'фото',
-                    'rating': 'рейтинг'
-                };
-                
-                const changedFields = details.fields.filter(f => fieldNames[f]).map(f => fieldNames[f]).join(', ');
-                return `Салон: ${objectName}, изменено: ${changedFields}`;
-            }
-            return `Салон: ${objectName}`;
-        
-        case 'service':
-            return `Услуга: ${objectName}`;
-        
-        case 'master':
-            return `Мастер: ${objectName}`;
-        
-        case 'user':
-            if (action.actionType === 'user_update') return `Пользователь: ${objectName}, изменено: профиль`;
-            return `Пользователь: ${objectName}`;
-        
-        case 'booking':
-            return `Запись: ${details.salonName || objectName}`;
-        
-        case 'review':
-            return `Отзыв: для салона ${details.salonName || objectName}`;
-        
-        case 'salon_rating':
-            return `Рейтинг салона: ${objectName}`;
-        
-        default:
-            return `${objectType}: ${objectName}`;
-    }
+    const types = {
+        'salon': 'Салон',
+        'service': 'Услуга',
+        'master': 'Мастер',
+        'user': 'Пользователь',
+        'booking': 'Запись',
+        'review': 'Отзыв'
+    };
+    
+    return `${types[objectType] || objectType}: ${objectName}`;
 }
 
-// ==============================================
-// ФУНКЦИЯ ОТМЕНЫ ДЕЙСТВИЯ (UNDO)
-// ==============================================
 async function undoAction(actionId) {
-    if (!confirm('Вы уверены, что хотите отменить это действие?')) return;
+    if (!confirm('Отменить это действие?')) return;
     
     try {
         const actionDoc = await db.collection('actions_history').doc(actionId).get();
-        if (!actionDoc.exists) {
-            showNotification('Действие не найдено', 'error');
-            return;
-        }
+        if (!actionDoc.exists) return;
         
         const action = actionDoc.data();
         const originalData = action.details?.originalData;
         
-        console.log('Попытка отмены действия:', action);
-        console.log('originalData:', originalData);
-        
         if (!originalData) {
-            showNotification('Невозможно отменить это действие (нет данных для восстановления)', 'error');
+            showNotification('Невозможно отменить действие', 'error');
             return;
         }
         
         let restored = false;
         
-        switch(action.objectType) {
+        switch (action.objectType) {
             case 'salon':
                 if (action.actionType === 'update') {
                     await db.collection('salons').doc(action.objectId).update(originalData);
@@ -3062,7 +3556,6 @@ async function undoAction(actionId) {
                     restored = true;
                 }
                 break;
-            
             case 'service':
                 if (action.actionType === 'update') {
                     await db.collection('services').doc(action.objectId).update(originalData);
@@ -3072,7 +3565,6 @@ async function undoAction(actionId) {
                     restored = true;
                 }
                 break;
-            
             case 'master':
                 if (action.actionType === 'update') {
                     await db.collection('masters').doc(action.objectId).update(originalData);
@@ -3082,805 +3574,536 @@ async function undoAction(actionId) {
                     restored = true;
                 }
                 break;
-            
             case 'review':
                 if (action.actionType === 'delete') {
                     await db.collection('reviews').doc(action.objectId).set(originalData);
-                    restored = true;
-                } else if (action.actionType === 'update') {
-                    await db.collection('reviews').doc(action.objectId).update(originalData);
-                    restored = true;
-                }
-                break;
-            
-            case 'user':
-                if (action.actionType === 'delete') {
-                    await db.collection('users').doc(action.objectId).set(originalData);
-                    restored = true;
-                } else if (action.actionType === 'update') {
-                    await db.collection('users').doc(action.objectId).update(originalData);
                     restored = true;
                 }
                 break;
         }
         
         if (restored) {
-            await db.collection('actions_history').doc(actionId).update({
-                status: 'undone',
-                undoneAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            
-            showNotification('Действие успешно отменено');
-            
+            await db.collection('actions_history').doc(actionId).update({ status: 'undone' });
+            showNotification('Действие отменено');
             loadActionsHistory();
             updateAdminTables();
-            
-            if (action.objectType === 'salon' && currentSalon && currentSalon.id === action.objectId) {
-                loadSalonPage(action.objectId);
-            }
-        } else {
-            showNotification('Невозможно отменить это действие (неподдерживаемый тип или действие)', 'error');
+            clearCache();
         }
     } catch (error) {
         console.error('Ошибка отмены действия:', error);
-        showNotification('Ошибка при отмене действия', 'error');
+        showNotification('Ошибка при отмене', 'error');
     }
 }
 
-// ==============================================
-// ОЧИСТКА ВСЕЙ ИСТОРИИ ДЕЙСТВИЙ (ТОЛЬКО ДЛЯ АДМИНА)
-// ==============================================
 async function clearActionsHistory() {
-    if (!currentUser || currentUser.role !== 'admin') {
-        showNotification('Только администратор может очистить историю действий', 'error');
-        return;
-    }
-
-    if (!confirm('Вы уверены, что хотите удалить ВСЮ историю действий? Это действие необратимо.')) return;
-
+    if (!confirm('Очистить всю историю?')) return;
+    
     try {
         const snapshot = await db.collection('actions_history').get();
-        if (snapshot.empty) {
-            showNotification('История действий уже пуста', 'info');
-            return;
-        }
-
         const batch = db.batch();
         snapshot.docs.forEach(doc => batch.delete(doc.ref));
         await batch.commit();
-
-        showNotification('История действий полностью очищена', 'success');
+        showNotification('История очищена');
         loadActionsHistory();
     } catch (error) {
         console.error('Ошибка очистки истории:', error);
-        showNotification('Ошибка при очистке истории', 'error');
+        showNotification('Ошибка при очистке', 'error');
     }
 }
 
 // ==============================================
-// ФУНКЦИИ ДЛЯ УПРАВЛЕНИЯ ОТЗЫВАМИ (С ФИЛЬТРОМ)
+// ЗАЯВКИ МАСТЕРОВ
 // ==============================================
-async function populateSalonFilterForReviews() {
-    const select = document.getElementById('review-salon-filter');
-    if (!select) return;
-
-    try {
-        const salons = await getSalons();
-        select.innerHTML = '<option value="all">Все салоны</option>';
-        salons.forEach(salon => {
-            const option = document.createElement('option');
-            option.value = salon.id;
-            option.textContent = salon.name;
-            select.appendChild(option);
-        });
-    } catch (error) {
-        console.error('Ошибка загрузки салонов для фильтра:', error);
-    }
-}
-
-async function loadReviewsManagement() {
-    const tableBody = document.getElementById('reviews-management-table');
+async function loadMasterRequests() {
+    const tableBody = document.getElementById('master-requests-table');
     if (!tableBody) return;
-
-    const filterSelect = document.getElementById('review-salon-filter');
-    const selectedSalonId = filterSelect ? filterSelect.value : 'all';
-
-    let reviews;
-    if (selectedSalonId === 'all') {
-        reviews = await getReviews();
-    } else {
-        reviews = await getReviews({ salonId: selectedSalonId });
-    }
-
-    tableBody.innerHTML = '';
-
-    for (const review of reviews) {
-        let salonName = 'Неизвестный салон';
-        if (review.salonId) {
-            try {
-                const salonDoc = await db.collection('salons').doc(review.salonId).get();
-                if (salonDoc.exists) salonName = salonDoc.data().name;
-            } catch (error) {
-                console.error('Ошибка загрузки салона:', error);
-            }
-        }
-
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${review.authorName || 'Анонимный пользователь'}</td>
-            <td>${salonName}</td>
-            <td>${renderStars(review.rating || 0)} ${review.rating || 0}</td>
-            <td>${review.text ? (review.text.length > 100 ? review.text.substring(0, 100) + '...' : review.text) : 'Нет текста'}</td>
-            <td>${formatDate(review.date)}</td>
-            <td><button class="action-btn delete" onclick="deleteReview('${review.id}')">Удалить</button></td>
-        `;
-        tableBody.appendChild(row);
-    }
-}
-
-// ==============================================
-// РЕДАКТИРОВАНИЕ ПОЛЬЗОВАТЕЛЯ
-// ==============================================
-async function editUser(userId) {
-    editingUserId = userId;
     
     try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        if (userDoc.exists) {
-            const user = userDoc.data();
-            
-            document.getElementById('edit-user-name').value = user.name || '';
-            document.getElementById('edit-user-lastname').value = user.lastname || '';
-            document.getElementById('edit-user-email').value = user.email || '';
-            document.getElementById('edit-user-phone').value = user.phone || '';
-            document.getElementById('edit-user-role').value = user.role || 'client';
-            
-            showModal('edit-user-modal');
-        }
+        const snapshot = await db.collection('master_requests').orderBy('createdAt', 'desc').get();
+        tableBody.innerHTML = '';
+        
+        snapshot.forEach(doc => {
+            const req = doc.data();
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${req.userName || 'Неизвестно'}</td>
+                <td>${req.userEmail || ''}</td>
+                <td>${req.salonName || 'Неизвестно'}</td>
+                <td>${req.specialization || ''}</td>
+                <td>${formatDate(req.createdAt)}</td>
+                <td>${req.status || 'pending'}</td>
+                <td>
+                    ${req.status === 'pending' ? `
+                        <button class="action-btn complete" onclick="approveMasterRequest('${doc.id}')">Одобрить</button>
+                        <button class="action-btn cancel" onclick="rejectMasterRequest('${doc.id}')">Отклонить</button>
+                    ` : ''}
+                </td>
+            `;
+            tableBody.appendChild(row);
+        });
     } catch (error) {
-        console.error('Ошибка загрузки пользователя:', error);
-        showNotification('Ошибка загрузки данных пользователя', 'error');
+        console.error('Ошибка загрузки заявок:', error);
     }
 }
 
-async function saveUser() {
-    const name = document.getElementById('edit-user-name').value.trim();
-    const lastname = document.getElementById('edit-user-lastname').value.trim();
-    const email = document.getElementById('edit-user-email').value.trim();
-    const phone = document.getElementById('edit-user-phone').value.trim();
-    const role = document.getElementById('edit-user-role').value;
-
-    if (!name || !email || !role) {
-        showNotification('Пожалуйста, заполните обязательные поля', 'error');
-        return;
-    }
-
-    if (!editingUserId) {
-        showNotification('Ошибка: ID пользователя не указан', 'error');
-        return;
-    }
-
+async function approveMasterRequest(requestId) {
     try {
-        const oldUserDoc = await db.collection('users').doc(editingUserId).get();
-        const oldData = oldUserDoc.exists ? oldUserDoc.data() : null;
+        const requestDoc = await db.collection('master_requests').doc(requestId).get();
+        if (!requestDoc.exists) return;
+        
+        const request = requestDoc.data();
+        await db.collection('master_requests').doc(requestId).update({ status: 'approved' });
+        
+        const masterData = {
+            name: request.userName,
+            specialization: request.specialization,
+            salonId: request.salonId,
+            salonName: request.salonName,
+            userId: request.userId,
+            price: 0,
+            providedServices: [],
+            rating: 0,
+            reviewCount: 0,
+            daysOff: [],
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await db.collection('masters').add(masterData);
+        await db.collection('users').doc(request.userId).update({ role: 'master' });
+        
+        showNotification('Заявка одобрена');
+        loadMasterRequests();
+        clearCache();
+    } catch (error) {
+        console.error('Ошибка одобрения заявки:', error);
+        showNotification('Ошибка', 'error');
+    }
+}
 
-        await db.collection('users').doc(editingUserId).update({ name, lastname, email, phone, role });
+async function rejectMasterRequest(requestId) {
+    try {
+        await db.collection('master_requests').doc(requestId).update({ status: 'rejected' });
+        showNotification('Заявка отклонена');
+        loadMasterRequests();
+    } catch (error) {
+        console.error('Ошибка отклонения заявки:', error);
+        showNotification('Ошибка', 'error');
+    }
+}
 
-        await logAction('user_update', 'user', editingUserId, {
-            fields: ['name', 'lastname', 'email', 'phone', 'role'],
-            originalData: oldData
-        }, `${name} ${lastname}`);
+async function submitMasterRequest() {
+    if (!currentUser || currentUser.role !== 'client') {
+        showNotification('Только клиенты могут подавать заявки', 'error');
+        return;
+    }
+    
+    const salonId = document.getElementById('request-salon').value;
+    const specialization = document.getElementById('request-specialization').value;
+    
+    if (!salonId || !specialization) {
+        showNotification('Заполните все поля', 'error');
+        return;
+    }
+    
+    try {
+        const salonDoc = await db.collection('salons').doc(salonId).get();
+        if (!salonDoc.exists) {
+            showNotification('Салон не найден', 'error');
+            return;
+        }
+        const salon = salonDoc.data();
+        
+        const requestData = {
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userEmail: currentUser.email,
+            salonId: salonId,
+            salonName: salon.name,
+            specialization: specialization,
+            status: 'pending',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await db.collection('master_requests').add(requestData);
+        
+        hideModal('master-request-modal');
+        showNotification('Заявка отправлена!', 'success');
+    } catch (error) {
+        console.error('Ошибка отправки заявки:', error);
+        showNotification('Ошибка при отправке', 'error');
+    }
+}
 
-        showNotification('Данные пользователя обновлены');
-
-        hideModal('edit-user-modal');
+// ==============================================
+// ФУНКЦИИ ДЛЯ ФОРМ
+// ==============================================
+async function addSalon() {
+    const name = document.getElementById('salon-name').value.trim();
+    const address = document.getElementById('salon-address').value.trim();
+    
+    if (!name || !address) {
+        showNotification('Заполните обязательные поля', 'error');
+        return;
+    }
+    
+    const fileInput = document.getElementById('salon-image-upload');
+    const urlInput = document.getElementById('salon-image-url');
+    let imageUrl = null;
+    
+    if (fileInput.files.length > 0) {
+        imageUrl = await uploadImage(fileInput.files[0], 'salons');
+    } else if (urlInput.value.trim()) {
+        imageUrl = urlInput.value.trim();
+    }
+    
+    const specializations = [];
+    document.querySelectorAll('input[name="specialization"]:checked').forEach(cb => specializations.push(cb.value));
+    
+    const selectedServiceIds = Array.from(document.querySelectorAll('#salon-services-checkboxes input:checked')).map(cb => cb.value);
+    
+    const salonData = {
+        name, address,
+        district: document.getElementById('salon-district').value,
+        description: document.getElementById('salon-description').value.trim(),
+        specializations,
+        serviceIds: selectedServiceIds,
+        ...(imageUrl && { imageUrl }),
+        rating: 0,
+        reviewCount: 0,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    
+    try {
+        if (editingSalonId) {
+            await db.collection('salons').doc(editingSalonId).update(salonData);
+            showNotification('Салон обновлен');
+        } else {
+            salonData.averagePrice = 2500;
+            salonData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+            await db.collection('salons').add(salonData);
+            showNotification('Салон добавлен');
+        }
+        
+        hideModal('add-salon-modal');
         updateAdminTables();
-        loadAdminStats();
-
-        editingUserId = null;
-        resetUserForm();
+        clearCache();
+        editingSalonId = null;
+        resetSalonForm();
     } catch (error) {
-        console.error('Ошибка обновления пользователя:', error);
-        showNotification('Ошибка при обновлении данных пользователя', 'error');
+        console.error('Ошибка сохранения салона:', error);
+        showNotification('Ошибка при сохранении', 'error');
     }
 }
 
-// ==============================================
-// ОБНОВЛЕНИЕ СТАТУСА ЗАПИСИ
-// ==============================================
-async function updateBookingStatus(bookingId, newStatus) {
-    try {
-        const bookingDoc = await db.collection('bookings').doc(bookingId).get();
-        const oldData = bookingDoc.exists ? bookingDoc.data() : null;
-
-        await db.collection('bookings').doc(bookingId).update({
-            status: newStatus,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        await logAction('update', 'booking', bookingId, {
-            field: 'status',
-            newValue: newStatus,
-            originalData: oldData
-        }, 'Статус записи изменен');
-
-        showNotification(`Статус записи изменен на "${newStatus}"`);
-
-        if (document.getElementById('admin-page').classList.contains('active')) updateAdminTables();
-        if (document.getElementById('profile-page').classList.contains('active')) loadUserBookings();
-        if (document.getElementById('master-mode').style.display !== 'none') {
-            loadMasterBookingsForMaster(currentActiveMasterId);
-        }
-    } catch (error) {
-        console.error('Ошибка обновления статуса записи:', error);
-        showNotification('Ошибка при изменении статуса', 'error');
-    }
-}
-
-// ==============================================
-// СТАТИСТИКА ДЛЯ АДМИНА
-// ==============================================
-async function loadAdminStats() {
-    try {
-        const [salons, services, masters, users, bookings, reviews] = await Promise.all([
-            getSalons(),
-            getServices(),
-            getMasters(),
-            getUsers(),
-            getBookings(),
-            getReviews()
-        ]);
-        
-        const statsContainer = document.getElementById('admin-stats');
-        if (!statsContainer) return;
-        
-        statsContainer.innerHTML = `
-            <div class="stat-card"><h3>${salons.length}</h3><p>Салоны</p></div>
-            <div class="stat-card"><h3>${services.length}</h3><p>Услуги</p></div>
-            <div class="stat-card"><h3>${masters.length}</h3><p>Мастера</p></div>
-            <div class="stat-card"><h3>${users.length}</h3><p>Пользователи</p></div>
-            <div class="stat-card"><h3>${bookings.length}</h3><p>Записи</p></div>
-            <div class="stat-card"><h3>${reviews.length}</h3><p>Отзывы</p></div>
-        `;
-    } catch (error) {
-        console.error('Ошибка загрузки статистики:', error);
-    }
-}
-
-// ==============================================
-// МАСТЕР-ПАНЕЛЬ С ПЕРЕКЛЮЧЕНИЕМ МЕЖДУ МАСТЕРАМИ
-// ==============================================
-async function loadAvailableMasters() {
-    if (!currentUser) return [];
+async function addService() {
+    const name = document.getElementById('service-name').value.trim();
+    const price = document.getElementById('service-price').value.trim();
     
-    return await getMasters();
-}
-
-async function populateMasterSelect() {
-    const select = document.getElementById('master-select');
-    if (!select) return;
-    
-    const masters = await loadAvailableMasters();
-    
-    select.innerHTML = '<option value="">Выберите мастера</option>';
-    
-    masters.forEach((master, index) => {
-        const option = document.createElement('option');
-        option.value = master.id;
-        option.textContent = `${master.name} (${master.salonName || 'Неизвестный салон'})`;
-        select.appendChild(option);
-    });
-    
-    if (masters.length > 0 && !currentActiveMasterId) {
-        currentActiveMasterId = masters[0].id;
-        select.value = currentActiveMasterId;
-    } else if (currentActiveMasterId) {
-        select.value = currentActiveMasterId;
-    }
-}
-
-async function loadMasterBookingsForMaster(masterId) {
-    if (!masterId) return;
-    
-    const bookings = await getBookings({ masterId: masterId });
-    
-    const tableBody = document.getElementById('master-bookings-table');
-    if (!tableBody) return;
-    
-    tableBody.innerHTML = '';
-    
-    bookings.forEach(booking => {
-        const row = document.createElement('tr');
-        
-        row.innerHTML = `
-            <td>${booking.clientName || ''} ${booking.clientLastname || ''}</td>
-            <td>${booking.serviceName || 'Неизвестно'}</td>
-            <td>${formatDate(booking.date)}</td>
-            <td>${booking.time || 'Не указан'}</td>
-            <td>${booking.clientPhone || 'Не указан'}</td>
-            <td><span class="booking-status ${getStatusClass(booking.status)}">${booking.status || 'Неизвестно'}</span></td>
-            <td>
-                ${(booking.status === 'Подтверждена' || !booking.status) ? `
-                    <button class="action-btn complete" onclick="updateBookingStatus('${booking.id}', 'Выполнено')">Выполнено</button>
-                    <button class="action-btn cancel" onclick="updateBookingStatus('${booking.id}', 'Отменено')">Отменить</button>
-                ` : ''}
-            </td>
-        `;
-        
-        tableBody.appendChild(row);
-    });
-}
-
-async function setupMasterPanel() {
-    if (!currentUser || currentUser.role !== 'master') return;
-    
-    const titleElement = document.getElementById('master-name-display');
-    if (titleElement) titleElement.textContent = `Личный кабинет мастера: ${currentUser.name || ''} ${currentUser.lastname || ''}`;
-    
-    await populateMasterSelect();
-    
-    const masters = await loadAvailableMasters();
-    
-    if (masters.length > 0) {
-        const master = masters[0];
-        currentActiveMasterId = master.id;
-        
-        document.getElementById('master-detail-name').textContent = master.name || '';
-        document.getElementById('master-detail-lastname').textContent = currentUser.lastname || '';
-        document.getElementById('master-detail-email').textContent = currentUser.email || '';
-        document.getElementById('master-detail-phone').textContent = currentUser.phone || 'Не указан';
-        document.getElementById('master-detail-salon').textContent = master.salonName || 'Неизвестно';
-        document.getElementById('master-detail-specialization').textContent = master.specialization || 'Не указана';
-        
-        await loadMasterBookingsForMaster(currentActiveMasterId);
-    } else {
-        showNotification('Нет доступных мастеров', 'warning');
-    }
-}
-
-async function loadMasterDetails() {
-    try {
-        const masters = await getMasters({ userId: currentUser.id });
-        if (masters.length > 0) {
-            const master = masters[0];
-            
-            document.getElementById('master-detail-name').textContent = currentUser.name || '';
-            document.getElementById('master-detail-lastname').textContent = currentUser.lastname || '';
-            document.getElementById('master-detail-email').textContent = currentUser.email || '';
-            document.getElementById('master-detail-phone').textContent = currentUser.phone || 'Не указан';
-            document.getElementById('master-detail-salon').textContent = master.salonName || 'Неизвестно';
-            document.getElementById('master-detail-specialization').textContent = master.specialization || 'Не указана';
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки данных мастера:', error);
-    }
-}
-
-async function loadMasterBookings() {
-    if (!currentActiveMasterId) return;
-    
-    await loadMasterBookingsForMaster(currentActiveMasterId);
-}
-
-async function loadMasterActionsHistory() {
-    if (!currentUser) return;
-    
-    const actions = await getActionsHistory({ userId: currentUser.id });
-    
-    const tableBody = document.getElementById('master-actions-history-table');
-    if (!tableBody) return;
-    
-    tableBody.innerHTML = '';
-    
-    actions.forEach(action => {
-        const row = document.createElement('tr');
-        
-        row.innerHTML = `
-            <td>${formatDateTime(action.timestamp)}</td>
-            <td>${getActionDescription(action)}</td>
-            <td>${getObjectDescription(action)}</td>
-            <td>${action.status === 'completed' && action.actionType !== 'booking' ? `<button class="action-btn undo" onclick="undoAction('${action.id}')">Отменить</button>` : action.status === 'undone' ? 'Отменено' : '-'}</td>
-        `;
-        
-        tableBody.appendChild(row);
-    });
-}
-
-async function editMasterProfile() {
-    try {
-        const masters = await getMasters({ userId: currentUser.id });
-        if (masters.length > 0) {
-            const master = masters[0];
-            
-            document.getElementById('edit-master-name').value = currentUser.name || '';
-            document.getElementById('edit-master-lastname').value = currentUser.lastname || '';
-            document.getElementById('edit-master-email').value = currentUser.email || '';
-            document.getElementById('edit-master-phone').value = currentUser.phone || '';
-            
-            const specializationSelect = document.getElementById('edit-master-specialization');
-            if (specializationSelect) {
-                if (specializationSelect.tagName === 'INPUT') {
-                    const select = document.createElement('select');
-                    select.id = 'edit-master-specialization';
-                    select.className = 'form-input';
-                    select.innerHTML = `
-                        <option value="">Выберите специализацию</option>
-                        <option value="Парикмахер">Парикмахер</option>
-                        <option value="Мастер маникюра">Мастер маникюра</option>
-                        <option value="Косметолог">Косметолог</option>
-                        <option value="Массажист">Массажист</option>
-                        <option value="Барбер">Барбер</option>
-                        <option value="Визажист">Визажист</option>
-                        <option value="Бровист">Бровист</option>
-                        <option value="Лешмейкер">Лешмейкер</option>
-                        <option value="Эстетист">Эстетист</option>
-                        <option value="Подолог">Подолог</option>
-                    `;
-                    
-                    specializationSelect.parentNode.replaceChild(select, specializationSelect);
-                }
-                
-                const newSelect = document.getElementById('edit-master-specialization');
-                if (newSelect && master.specialization) newSelect.value = master.specialization;
-            }
-            
-            document.getElementById('edit-master-password').value = '';
-            
-            showModal('edit-master-modal');
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки данных мастера:', error);
-        showNotification('Ошибка загрузки данных профиля', 'error');
-    }
-}
-
-async function saveMasterProfile() {
-    const name = document.getElementById('edit-master-name').value.trim();
-    const lastname = document.getElementById('edit-master-lastname').value.trim();
-    const email = document.getElementById('edit-master-email').value.trim();
-    const phone = document.getElementById('edit-master-phone').value.trim();
-    const specializationElement = document.getElementById('edit-master-specialization');
-    const specialization = specializationElement.tagName === 'SELECT' ? specializationElement.value : specializationElement.value.trim();
-    const password = document.getElementById('edit-master-password').value.trim();
-    
-    if (!name || !email || !specialization) {
-        showNotification('Пожалуйста, заполните обязательные поля', 'error');
+    if (!name || !price) {
+        showNotification('Заполните обязательные поля', 'error');
         return;
     }
     
+    const fileInput = document.getElementById('service-image-upload');
+    const urlInput = document.getElementById('service-image-url');
+    let imageUrl = null;
+    
+    if (fileInput.files.length > 0) {
+        imageUrl = await uploadImage(fileInput.files[0], 'services');
+    } else if (urlInput.value.trim()) {
+        imageUrl = urlInput.value.trim();
+    }
+    
+    const serviceData = {
+        name,
+        category: document.getElementById('service-category').value,
+        price: parseInt(price),
+        duration: parseInt(document.getElementById('service-duration').value) || 60,
+        ...(imageUrl && { imageUrl }),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    
+    const selectedSalonIds = Array.from(document.querySelectorAll('#service-salons-checkboxes input:checked')).map(cb => cb.value);
+    
     try {
-        const oldUserDoc = await db.collection('users').doc(currentUser.id).get();
-        const oldUserData = oldUserDoc.exists ? oldUserDoc.data() : null;
-
-        await db.collection('users').doc(currentUser.id).update({ name, lastname, email, phone });
+        const batch = db.batch();
         
-        const masters = await getMasters({ userId: currentUser.id });
-        if (masters.length > 0) {
-            const master = masters[0];
-            await db.collection('masters').doc(master.id).update({
-                name: `${name} ${lastname}`,
-                specialization
+        for (const salonId of selectedSalonIds) {
+            const serviceRef = db.collection('services').doc();
+            batch.set(serviceRef, { ...serviceData, salonId });
+            batch.update(db.collection('salons').doc(salonId), {
+                serviceIds: firebase.firestore.FieldValue.arrayUnion(serviceRef.id)
             });
         }
         
-        if (password) {
-            try {
-                const user = auth.currentUser;
-                if (user) {
-                    await user.updatePassword(password);
-                }
-            } catch (error) {
-                console.error('Ошибка обновления пароля:', error);
-                showNotification('Ошибка обновления пароля. Попробуйте более сложный пароль.', 'error');
-                return;
+        await batch.commit();
+        showNotification('Услуга добавлена');
+        hideModal('add-service-modal');
+        updateAdminTables();
+        loadAdminServicesGrid();
+        clearCache();
+        resetServiceForm();
+    } catch (error) {
+        console.error('Ошибка сохранения услуги:', error);
+        showNotification('Ошибка при сохранении', 'error');
+    }
+}
+
+async function addMaster() {
+    const name = document.getElementById('master-name').value.trim();
+    const lastname = document.getElementById('master-lastname').value.trim();
+    
+    let specialization = document.getElementById('master-specialization').value;
+    if (specialization === 'other') {
+        specialization = document.getElementById('master-specialization-other').value.trim();
+        if (!specialization) {
+            showNotification('Укажите специализацию', 'error');
+            return;
+        }
+    }
+    
+    const salonId = document.getElementById('master-salon').value;
+    const email = document.getElementById('master-email').value.trim();
+    const password = document.getElementById('master-password').value.trim();
+    
+    const providedServices = Array.from(document.querySelectorAll('#master-services-checkboxes input:checked')).map(cb => cb.value);
+    
+    if (!name || !lastname || !specialization || !salonId) {
+        showNotification('Заполните обязательные поля', 'error');
+        return;
+    }
+    
+    if (!editingMasterId && (!email || !password)) {
+        showNotification('Укажите email и пароль', 'error');
+        return;
+    }
+    
+    if (!editingMasterId && password.length < 6) {
+        showNotification('Пароль должен быть минимум 6 символов', 'error');
+        return;
+    }
+    
+    const fileInput = document.getElementById('master-image-upload');
+    const urlInput = document.getElementById('master-image-url');
+    let imageUrl = null;
+    
+    if (fileInput.files.length > 0) {
+        imageUrl = await uploadImage(fileInput.files[0], 'masters');
+    } else if (urlInput.value.trim()) {
+        imageUrl = urlInput.value.trim();
+    }
+    
+    try {
+        const salonDoc = await db.collection('salons').doc(salonId).get();
+        const salonName = salonDoc.exists ? salonDoc.data().name : 'Неизвестный салон';
+        
+        if (editingMasterId) {
+            await db.collection('masters').doc(editingMasterId).update({
+                name: `${name} ${lastname}`,
+                firstName: name,
+                lastName: lastname,
+                specialization,
+                salonId,
+                salonName,
+                providedServices,
+                ...(imageUrl && { imageUrl }),
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            showNotification('Мастер обновлен');
+        } else {
+            const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            await db.collection('users').doc(user.uid).set({
+                email, name, lastname, phone: '', role: 'master',
+                registrationDate: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            await db.collection('masters').add({
+                name: `${name} ${lastname}`,
+                firstName: name,
+                lastName: lastname,
+                specialization,
+                price: 0,
+                salonId,
+                salonName,
+                providedServices,
+                userId: user.uid,
+                ...(imageUrl && { imageUrl }),
+                rating: 0,
+                reviewCount: 0,
+                daysOff: [],
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            showNotification('Мастер добавлен');
+        }
+        
+        hideModal('add-master-modal');
+        updateAdminTables();
+        clearCache();
+        editingMasterId = null;
+        resetMasterForm();
+    } catch (error) {
+        console.error('Ошибка сохранения мастера:', error);
+        if (error.code === 'auth/email-already-in-use') {
+            showNotification('Пользователь с таким email уже существует', 'error');
+        } else {
+            showNotification('Ошибка при сохранении', 'error');
+        }
+    }
+}
+
+async function loadSelectOptions() {
+    const salons = await getCachedData('salons');
+    
+    ['service-salon', 'master-salon', 'request-salon'].forEach(id => {
+        const select = document.getElementById(id);
+        if (select) {
+            select.innerHTML = '<option value="">Выберите салон</option>';
+            salons.forEach(salon => {
+                const option = document.createElement('option');
+                option.value = salon.id;
+                option.textContent = salon.name;
+                select.appendChild(option);
+            });
+        }
+    });
+    
+    const serviceSalonsContainer = document.getElementById('service-salons-checkboxes');
+    if (serviceSalonsContainer) {
+        serviceSalonsContainer.innerHTML = '';
+        salons.forEach(salon => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'checkbox-item';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = salon.id;
+            checkbox.id = `service-salon-${salon.id}`;
+            const label = document.createElement('label');
+            label.htmlFor = `service-salon-${salon.id}`;
+            label.textContent = salon.name;
+            wrapper.appendChild(checkbox);
+            wrapper.appendChild(label);
+            serviceSalonsContainer.appendChild(wrapper);
+        });
+    }
+}
+
+async function loadSalonServicesCheckboxes(selectedIds = []) {
+    const container = document.getElementById('salon-services-checkboxes');
+    if (!container) return;
+    
+    const uniqueServices = await getUniqueServices();
+    container.innerHTML = '';
+    
+    if (uniqueServices.length === 0) {
+        container.innerHTML = '<p class="text-muted">Нет услуг</p>';
+        return;
+    }
+    
+    uniqueServices.forEach(service => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'checkbox-item';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = service.id;
+        checkbox.id = `salon-service-${service.id}`;
+        checkbox.checked = selectedIds.includes(service.id);
+        
+        const label = document.createElement('label');
+        label.htmlFor = `salon-service-${service.id}`;
+        label.textContent = `${service.name} (${service.price} ₽)`;
+        
+        wrapper.appendChild(checkbox);
+        wrapper.appendChild(label);
+        container.appendChild(wrapper);
+    });
+}
+
+async function updateMasterServicesCheckboxes(salonId, selectedIds = []) {
+    const container = document.getElementById('master-services-checkboxes');
+    if (!container) return;
+    
+    if (!salonId) {
+        container.innerHTML = '<p class="text-muted">Сначала выберите салон</p>';
+        return;
+    }
+    
+    const services = await getSalonServices(salonId);
+    const uniqueServices = new Map();
+    services.forEach(service => {
+        if (!uniqueServices.has(service.name)) {
+            uniqueServices.set(service.name, service);
+        }
+    });
+    
+    container.innerHTML = '';
+    if (uniqueServices.size === 0) {
+        container.innerHTML = '<p class="text-muted">В салоне нет услуг</p>';
+        return;
+    }
+    
+    uniqueServices.forEach(service => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'checkbox-item';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = service.id;
+        checkbox.id = `master-service-${service.id}`;
+        checkbox.checked = selectedIds.includes(service.id);
+        
+        const label = document.createElement('label');
+        label.htmlFor = `master-service-${service.id}`;
+        label.textContent = `${service.name} (${service.price} ₽)`;
+        
+        wrapper.appendChild(checkbox);
+        wrapper.appendChild(label);
+        container.appendChild(wrapper);
+    });
+    
+    attachMasterPriceListener();
+}
+
+function attachMasterPriceListener() {
+    const container = document.getElementById('master-services-checkboxes');
+    if (!container) return;
+    
+    container.removeEventListener('change', updateMasterPriceFromCheckboxes);
+    container.addEventListener('change', updateMasterPriceFromCheckboxes);
+}
+
+function updateMasterPriceFromCheckboxes() {
+    const checkboxes = document.querySelectorAll('#master-services-checkboxes input:checked');
+    let total = 0;
+    let count = 0;
+    
+    checkboxes.forEach(cb => {
+        const label = document.querySelector(`label[for="${cb.id}"]`);
+        if (label) {
+            const match = label.textContent.match(/\((\d+)\s*₽\)/);
+            if (match) {
+                total += parseInt(match[1]);
+                count++;
             }
         }
-        
-        currentUser.name = name;
-        currentUser.lastname = lastname;
-        currentUser.email = email;
-        currentUser.phone = phone;
-        localStorage.setItem('beautyBookingUser', JSON.stringify(currentUser));
-        
-        await logAction('user_update', 'user', currentUser.id, {
-            fields: ['name', 'lastname', 'email', 'phone', 'specialization'],
-            originalData: oldUserData
-        }, `${name} ${lastname}`);
-        
-        showNotification('Профиль успешно обновлен');
-        
-        hideModal('edit-master-modal');
-        setupMasterPanel();
-    } catch (error) {
-        console.error('Ошибка обновления профиля:', error);
-        showNotification('Ошибка при обновлении профиля', 'error');
-    }
-}
-
-async function deleteMasterProfile() {
-    if (!confirm('Вы уверены, что хотите удалить свой профиль? Это действие нельзя отменить.')) return;
-    
-    try {
-        const masters = await getMasters({ userId: currentUser.id });
-        
-        for (const master of masters) {
-            await db.collection('masters').doc(master.id).delete();
-        }
-        
-        await db.collection('users').doc(currentUser.id).delete();
-        
-        await auth.signOut();
-        
-        currentUser = null;
-        localStorage.removeItem('beautyBookingUser');
-        
-        updateProfileButton();
-        
-        showNotification('Ваш профиль успешно удален');
-        
-        showPage('home-page');
-    } catch (error) {
-        console.error('Ошибка удаления профиля:', error);
-        showNotification('Ошибка при удалении профиля', 'error');
-    }
-}
-
-// ==============================================
-// КАЛЕНДАРЬ МАСТЕРА
-// ==============================================
-async function loadMasterSchedulePage() {
-    if (!currentUser || currentUser.role !== 'master') {
-        showNotification('Только мастера могут просматривать это расписание', 'error');
-        showPage('home-page');
-        return;
-    }
-    
-    renderCalendar(currentCalendarMonth);
-    loadDayBookings(new Date().toISOString().split('T')[0]);
-}
-
-function renderCalendar(date) {
-    const container = document.getElementById('calendar-container');
-    if (!container) return;
-    
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    
-    const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-    
-    document.getElementById('current-month').textContent = `${monthNames[month]} ${year}`;
-    
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
-    
-    let html = `<div class="calendar-grid">
-        <div class="calendar-day">Пн</div>
-        <div class="calendar-day">Вт</div>
-        <div class="calendar-day">Ср</div>
-        <div class="calendar-day">Чт</div>
-        <div class="calendar-day">Пт</div>
-        <div class="calendar-day">Сб</div>
-        <div class="calendar-day">Вс</div>`;
-    
-    const firstDayIndex = (firstDay.getDay() + 6) % 7;
-    
-    for (let i = 0; i < firstDayIndex; i++) {
-        html += '<div class="calendar-date"></div>';
-    }
-    
-    const today = new Date().toISOString().split('T')[0];
-    
-    for (let day = 1; day <= daysInMonth; day++) {
-        const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-        const dayOfWeek = new Date(year, month, day).getDay();
-        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-        const isToday = dateStr === today;
-        
-        let className = 'calendar-date';
-        if (isToday) className += ' selected';
-        if (isWeekend) className += ' weekend';
-        
-        html += `<div class="${className}" data-date="${dateStr}">${day}</div>`;
-    }
-    
-    html += '</div>';
-    
-    container.innerHTML = html;
-    
-    container.querySelectorAll('.calendar-date[data-date]').forEach(dateEl => {
-        dateEl.addEventListener('click', async function() {
-            const selectedDate = this.getAttribute('data-date');
-            
-            container.querySelectorAll('.calendar-date').forEach(el => el.classList.remove('selected'));
-            
-            this.classList.add('selected');
-            
-            loadDayBookings(selectedDate);
-        });
     });
     
-    const todayEl = container.querySelector(`.calendar-date[data-date="${today}"]`);
-    if (todayEl) {
-        todayEl.click();
-    }
+    document.getElementById('master-price').value = count ? Math.round(total / count) : 0;
 }
 
-async function loadDayBookings(date) {
-    if (!currentUser) return;
-    
-    const masters = await getMasters({ userId: currentUser.id });
-    if (masters.length === 0) return;
-    
-    const master = masters[0];
-    
-    const bookings = await getBookings({ masterId: master.id, date: date, status: 'Подтверждена' });
-    
-    const container = document.getElementById('day-bookings');
-    const dateText = document.getElementById('selected-date-text');
-    
-    if (!container || !dateText) return;
-    
-    const formattedDate = formatDate(date);
-    dateText.textContent = formattedDate;
-    
-    if (bookings.length === 0) {
-        container.innerHTML = `<div style="text-align: center; padding: 40px 20px; color: var(--text-light);">
-            <i class="far fa-calendar-check" style="font-size: 48px; margin-bottom: 20px;"></i>
-            <p>На эту дату нет записей</p>
-        </div>`;
-        return;
-    }
-    
-    bookings.sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
-    
-    let html = '';
-    
-    bookings.forEach(booking => {
-        html += `
-            <div class="booking-item">
-                <div class="booking-time">${booking.time || 'Не указано'}</div>
-                <div class="booking-service">${booking.serviceName || 'Неизвестно'}</div>
-                <div class="booking-client">${booking.clientName || ''} ${booking.clientLastname || ''}</div>
-                <div class="booking-status confirmed">${booking.status || 'Неизвестно'}</div>
-            </div>
-        `;
-    });
-    
-    container.innerHTML = html;
-}
-
-function prevMonth() {
-    currentCalendarMonth.setMonth(currentCalendarMonth.getMonth() - 1);
-    renderCalendar(currentCalendarMonth);
-    loadDayBookings(currentCalendarMonth.toISOString().split('T')[0]);
-}
-
-function nextMonth() {
-    currentCalendarMonth.setMonth(currentCalendarMonth.getMonth() + 1);
-    renderCalendar(currentCalendarMonth);
-    loadDayBookings(currentCalendarMonth.toISOString().split('T')[0]);
-}
-
-// ==============================================
-// ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (МОИ ЗАПИСИ)
-// ==============================================
-async function loadUserBookings() {
-    const container = document.getElementById('user-bookings-container');
-    if (!container) return;
-    
-    if (!currentUser || currentUser.role !== 'client') {
-        container.innerHTML = `<div class="auth-required-message">
-            <p>Для просмотра ваших записей необходимо войти в систему как клиент.</p>
-            <button class="btn" onclick="showModal('profile-modal')">Войти</button>
-        </div>`;
-        return;
-    }
-    
-    const userBookings = await getBookings({ userId: currentUser.id });
-    
-    if (userBookings.length === 0) {
-        container.innerHTML = `<div style="text-align: center; padding: 50px 0; color: var(--text-light);">
-            <i class="far fa-calendar-check" style="font-size: 48px; margin-bottom: 20px;"></i>
-            <p>У вас пока нет записей.</p>
-            <button class="btn" onclick="showPage('salons-page')" style="margin-top: 20px;">
-                <i class="fas fa-calendar-plus"></i> Записаться
-            </button>
-        </div>`;
-        return;
-    }
-    
-    container.innerHTML = `
-        <h2 style="margin-bottom: 30px;">Мои записи (${userBookings.length})</h2>
-        <div class="services-grid">
-            ${userBookings.map(booking => `
-                <div class="service-card" style="position: relative;">
-                    <div style="position: absolute; top: 15px; right: 15px; background: ${getStatusColor(booking.status)}; color: white; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;">${booking.status || 'Неизвестно'}</div>
-                    <div class="service-info">
-                        <h3 class="service-name">${booking.salonName || 'Неизвестный салон'}</h3>
-                        <p><strong>Услуга:</strong> ${booking.serviceName || 'Неизвестно'}</p>
-                        <p><strong>Мастер:</strong> ${booking.masterName || 'Неизвестно'}</p>
-                        <p><strong>Дата:</strong> ${formatDate(booking.date)}</p>
-                        <p><strong>Время:</strong> ${booking.time || 'Не указано'}</p>
-                        <p><strong>Цена:</strong> ${booking.totalPrice || 0} ₽</p>
-                        ${booking.clientComment ? `<p><strong>Комментарий:</strong> ${booking.clientComment}</p>` : ''}
-                        ${booking.status === 'Подтверждена' ? `<div style="margin-top: 15px;"><button class="action-btn cancel" onclick="cancelUserBooking('${booking.id}')">Отменить запись</button></div>` : ''}
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `;
-}
-
-function getStatusColor(status) {
-    const colors = {
-        'Подтверждена': 'var(--primary-color)',
-        'Выполнено': 'var(--success-color)',
-        'Отменено': 'var(--error-color)',
-        'Перенесено': 'var(--warning-color)'
-    };
-    
-    return colors[status] || 'var(--text-light)';
-}
-
-async function cancelUserBooking(bookingId) {
-    if (!confirm('Вы уверены, что хотите отменить эту запись?')) return;
-
-    try {
-        const bookingDoc = await db.collection('bookings').doc(bookingId).get();
-        const oldData = bookingDoc.exists ? bookingDoc.data() : null;
-
-        await db.collection('bookings').doc(bookingId).update({
-            status: 'Отменено',
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        await logAction('update', 'booking', bookingId, {
-            field: 'status',
-            newValue: 'Отменено',
-            userAction: true,
-            originalData: oldData
-        }, 'Запись отменена');
-
-        showNotification('Запись успешно отменена');
-        loadUserBookings();
-    } catch (error) {
-        console.error('Ошибка отмены записи:', error);
-        showNotification('Ошибка при отмене записи', 'error');
-    }
-}
-
-// ==============================================
-// ФУНКЦИЯ ПОИСКА (вызывается по кнопке или по debounce)
-// ==============================================
-async function performSearch() {
-    loadSalonsWithFilters();
-}
-
-// ==============================================
-// ФИЛЬТРАЦИЯ
-// ==============================================
-async function applyFilters() {
-    loadSalonsWithFilters();
-}
-
-// ==============================================
-// ДОПОЛНИТЕЛЬНЫЕ ФУНКЦИИ
-// ==============================================
 function resetSalonForm() {
     document.getElementById('salon-name').value = '';
     document.getElementById('salon-address').value = '';
     document.getElementById('salon-district').value = 'center';
     document.getElementById('salon-description').value = '';
-    
     document.querySelectorAll('input[name="specialization"]').forEach(cb => cb.checked = false);
-    
+    document.getElementById('salon-services-checkboxes').innerHTML = '';
     document.getElementById('salon-image-upload').value = '';
     document.getElementById('salon-image-url').value = '';
     document.getElementById('salon-image-preview').innerHTML = '';
-    
     document.getElementById('salon-modal-title').textContent = 'Добавить салон';
-    
     editingSalonId = null;
 }
 
@@ -3889,142 +4112,176 @@ function resetServiceForm() {
     document.getElementById('service-category').value = 'hair';
     document.getElementById('service-price').value = '';
     document.getElementById('service-duration').value = '60';
-    document.getElementById('service-salon').value = '';
-    
     document.getElementById('service-image-upload').value = '';
     document.getElementById('service-image-url').value = '';
     document.getElementById('service-image-preview').innerHTML = '';
-    
     document.getElementById('service-modal-title').textContent = 'Добавить услугу';
-    
     editingServiceId = null;
+    
+    loadSelectOptions().then(() => {
+        const container = document.getElementById('service-salons-checkboxes');
+        if (container) {
+            const salons = cache.salons || [];
+            container.innerHTML = '';
+            salons.forEach(salon => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'checkbox-item';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = salon.id;
+                checkbox.id = `service-salon-${salon.id}`;
+                const label = document.createElement('label');
+                label.htmlFor = `service-salon-${salon.id}`;
+                label.textContent = salon.name;
+                wrapper.appendChild(checkbox);
+                wrapper.appendChild(label);
+                container.appendChild(wrapper);
+            });
+        }
+    });
 }
 
 function resetMasterForm() {
     document.getElementById('master-name').value = '';
+    document.getElementById('master-lastname').value = '';
     
-    const specializationElement = document.getElementById('master-specialization');
-    if (specializationElement && specializationElement.tagName === 'SELECT') {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.id = 'master-specialization';
-        input.className = 'form-input';
-        input.placeholder = 'Специализация мастера';
-        
-        specializationElement.parentNode.replaceChild(input, specializationElement);
-    } else {
-        document.getElementById('master-specialization').value = '';
-    }
+    const specSelect = document.getElementById('master-specialization');
+    specSelect.value = '';
+    document.getElementById('master-specialization-other-group').style.display = 'none';
+    document.getElementById('master-specialization-other').value = '';
     
     document.getElementById('master-price').value = '';
     document.getElementById('master-salon').value = '';
-    
+    document.getElementById('master-services-checkboxes').innerHTML = '';
     document.getElementById('master-email').value = '';
     document.getElementById('master-password').value = '';
     
     document.getElementById('master-email').style.display = 'block';
     document.getElementById('master-password').style.display = 'block';
-    document.querySelector('label[for="master-email"]').style.display = 'block';
-    document.querySelector('label[for="master-password"]').style.display = 'block';
+    const emailLabel = document.querySelector('label[for="master-email"]');
+    const passwordLabel = document.querySelector('label[for="master-password"]');
+    if (emailLabel) emailLabel.style.display = 'block';
+    if (passwordLabel) passwordLabel.style.display = 'block';
     
     document.getElementById('master-image-upload').value = '';
     document.getElementById('master-image-url').value = '';
     document.getElementById('master-image-preview').innerHTML = '';
     
     document.getElementById('master-modal-title').textContent = 'Добавить мастера';
-    
     editingMasterId = null;
 }
 
-function resetUserForm() {
-    document.getElementById('edit-user-name').value = '';
-    document.getElementById('edit-user-lastname').value = '';
-    document.getElementById('edit-user-email').value = '';
-    document.getElementById('edit-user-phone').value = '';
-    document.getElementById('edit-user-role').value = 'client';
+async function addNewServiceForMaster() {
+    const salonId = document.getElementById('master-salon').value;
+    if (!salonId) {
+        showNotification('Сначала выберите салон', 'error');
+        return;
+    }
     
-    editingUserId = null;
-}
-
-async function loadSelectOptions() {
+    const name = document.getElementById('new-service-name').value.trim();
+    const category = document.getElementById('new-service-category').value;
+    const price = parseInt(document.getElementById('new-service-price').value);
+    const duration = parseInt(document.getElementById('new-service-duration').value);
+    
+    if (!name || !price || !duration) {
+        showNotification('Заполните все поля', 'error');
+        return;
+    }
+    
     try {
-        const salons = await getSalons();
+        const existing = await db.collection('services')
+            .where('name', '==', name)
+            .where('salonId', '==', salonId)
+            .get();
+            
+        if (!existing.empty) {
+            showNotification('Услуга с таким названием уже есть в этом салоне', 'warning');
+            return;
+        }
         
-        const salonSelects = [
-            document.getElementById('service-salon'),
-            document.getElementById('master-salon')
-        ];
+        const serviceData = {
+            name, category, price, duration,
+            salonId,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
         
-        salonSelects.forEach(select => {
-            if (select) {
-                select.innerHTML = '<option value="">Выберите салон</option>';
-                
-                salons.forEach(salon => {
-                    const option = document.createElement('option');
-                    option.value = salon.id;
-                    option.textContent = salon.name;
-                    select.appendChild(option);
-                });
-            }
+        const serviceRef = await db.collection('services').add(serviceData);
+        
+        await db.collection('salons').doc(salonId).update({
+            serviceIds: firebase.firestore.FieldValue.arrayUnion(serviceRef.id)
         });
+        
+        showNotification('Услуга добавлена');
+        await updateMasterServicesCheckboxes(salonId, [serviceRef.id]);
+        
+        hideModal('add-new-service-modal');
+        document.getElementById('new-service-name').value = '';
+        document.getElementById('new-service-price').value = '';
+        document.getElementById('new-service-duration').value = '60';
     } catch (error) {
-        console.error('Ошибка загрузки опций:', error);
+        console.error('Ошибка создания услуги:', error);
+        showNotification('Ошибка при создании', 'error');
     }
 }
 
-// ==============================================
-// ВОССТАНОВЛЕНИЕ АДМИНА
-// ==============================================
+async function loadMasterActionsHistory() {
+    const actions = await getActionsHistory({ userId: currentUser.id });
+    const tableBody = document.getElementById('master-actions-history-table');
+    if (!tableBody) return;
+    
+    if (actions.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="4" class="no-results">Нет истории действий</td></tr>';
+        return;
+    }
+    
+    tableBody.innerHTML = '';
+    actions.forEach(action => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${formatDateTime(action.timestamp)}</td>
+            <td>${getActionDescription(action)}</td>
+            <td>${getObjectDescription(action)}</td>
+            <td>-</td>
+        `;
+        tableBody.appendChild(row);
+    });
+}
+
+function updateServicesContainerHeight() {
+    const container = document.querySelector('.admin-section .data-table-container .services-grid');
+    if (container) {
+        const windowHeight = window.innerHeight;
+        const newHeight = Math.min(450, windowHeight - 200);
+        container.style.maxHeight = newHeight + 'px';
+    }
+}
+
 async function ensureAdminExists() {
     try {
         const adminEmail = 'admin@beauty.ru';
         const adminPassword = 'admin1';
         
         const users = await getUsers();
-        
-        const adminExists = users.some(user => 
-            user.email === adminEmail && user.role === 'admin'
-        );
+        const adminExists = users.some(user => user.email === adminEmail && user.role === 'admin');
         
         if (!adminExists) {
             try {
                 const userCredential = await auth.createUserWithEmailAndPassword(adminEmail, adminPassword);
                 const user = userCredential.user;
                 
-                const adminData = {
+                await db.collection('users').doc(user.uid).set({
                     email: adminEmail,
                     name: 'Администратор',
                     lastname: 'Системы',
                     phone: '+7 (999) 123-45-67',
                     role: 'admin',
                     isAdmin: true,
-                    registrationDate: firebase.firestore.FieldValue.serverTimestamp(),
-                    bookings: []
-                };
+                    registrationDate: firebase.firestore.FieldValue.serverTimestamp()
+                });
                 
-                await db.collection('users').doc(user.uid).set(adminData);
-                
-                console.log('Администратор успешно создан');
-                showNotification('Администратор восстановлен: admin@beauty.ru / admin1', 'success');
+                console.log('Администратор создан');
             } catch (error) {
-                if (error.code === 'auth/email-already-in-use') {
-                    const user = auth.currentUser;
-                    if (user) {
-                        const userDoc = await db.collection('users').doc(user.uid).get();
-                        if (userDoc.exists) {
-                            const userData = userDoc.data();
-                            if (userData.role !== 'admin') {
-                                await db.collection('users').doc(user.uid).update({
-                                    role: 'admin',
-                                    isAdmin: true
-                                });
-                                console.log('Роль администратора восстановлена');
-                            }
-                        }
-                    }
-                } else {
-                    console.error('Ошибка создания админа:', error);
-                }
+                console.error('Ошибка создания админа:', error);
             }
         }
     } catch (error) {
@@ -4033,62 +4290,54 @@ async function ensureAdminExists() {
 }
 
 // ==============================================
-// ИНИЦИАЛИЗАЦИЯ СТРАНИЦЫ
+// ЭКСПОРТ ФУНКЦИЙ
+// ==============================================
+window.showServicePage = showServicePage;
+window.openServiceManagementModal = openServiceManagementModal;
+window.deleteServiceByName = deleteServiceByName;
+window.editSalon = editSalon;
+window.editMaster = editMaster;
+window.editUser = editUser;
+window.deleteSalon = deleteSalon;
+window.deleteMaster = deleteMaster;
+window.deleteUser = deleteUser;
+window.updateBookingStatus = updateBookingStatus;
+window.startBookingForSalon = startBookingForSalon;
+window.startBookingForMaster = startBookingForMaster;
+window.showModal = showModal;
+window.hideModal = hideModal;
+window.login = login;
+window.register = register;
+window.logout = logout;
+window.submitReview = submitReview;
+window.submitMasterReview = submitMasterReview;
+window.prevMonth = prevMonth;
+window.nextMonth = nextMonth;
+window.cancelUserBooking = cancelUserBooking;
+window.approveMasterRequest = approveMasterRequest;
+window.rejectMasterRequest = rejectMasterRequest;
+window.deleteReview = deleteReview;
+window.undoAction = undoAction;
+window.clearActionsHistory = clearActionsHistory;
+
+// ==============================================
+// ИНИЦИАЛИЗАЦИЯ
 // ==============================================
 document.addEventListener('DOMContentLoaded', function() {
-    // Очищаем все поля ввода
-    document.querySelectorAll('input, textarea').forEach(element => {
-        if (element.type !== 'submit' && element.type !== 'button' && element.type !== 'checkbox') {
-            element.value = '';
-        }
+    document.querySelectorAll('input:not([type="submit"]):not([type="button"]):not([type="checkbox"]), textarea').forEach(element => {
+        element.value = '';
     });
     
-    // ИСПРАВЛЕНО: поле поиска с readonly и защитой от автозаполнения
     const searchInput = document.getElementById('global-search');
     if (searchInput) {
-        // Принудительно очищаем
         searchInput.value = '';
         
-        // Функция для активации поля (снимаем readonly и меняем name для сбивания автозаполнения)
-        const activateSearch = () => {
-            if (searchInput.hasAttribute('readonly')) {
-                searchInput.removeAttribute('readonly');
-                // Меняем name на уникальное, чтобы браузер не ассоциировал поле с сохранёнными данными
-                searchInput.setAttribute('name', 'search-query-' + Date.now());
-            }
-        };
-        
-        // Активируем при фокусе или клике (один раз)
-        searchInput.addEventListener('focus', activateSearch, { once: true });
-        searchInput.addEventListener('click', activateSearch, { once: true });
-        
-        // Таймаут на случай, если фокус не произошёл (например, если браузер сам ставит фокус)
-        setTimeout(() => {
-            if (searchInput && !searchInput.hasAttribute('readonly')) {
-                // Если readonly уже снят, ничего не делаем
-            } else {
-                // Если поле всё ещё readonly, снимаем readonly и очищаем
-                searchInput.removeAttribute('readonly');
-                searchInput.value = '';
-            }
-        }, 500);
-        
-        // Обработчик input (live‑поиск) – добавляем всегда
         searchInput.addEventListener('input', function(e) {
             clearTimeout(searchTimeout);
-            const query = e.target.value.trim();
-            if (query.includes('@')) {
-                this.value = this.value.replace(/@.*$/, '');
-                showNotification('Пожалуйста, используйте поиск по названию или адресу', 'warning');
-                return;
-            }
             searchTimeout = setTimeout(() => {
                 loadSalonsWithFilters();
             }, 300);
         });
-        
-        // Удаляем старый обработчик keypress
-        searchInput.removeEventListener('keypress', performSearch);
     }
     
     const savedUser = localStorage.getItem('beautyBookingUser');
@@ -4096,9 +4345,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             currentUser = JSON.parse(savedUser);
             updateProfileButton();
-            setupUserNavigation();
-        } catch (error) {
-            console.error('Ошибка загрузки пользователя из localStorage:', error);
+        } catch (e) {
             localStorage.removeItem('beautyBookingUser');
         }
     }
@@ -4108,50 +4355,35 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const userDoc = await db.collection('users').doc(user.uid).get();
                 if (userDoc.exists) {
-                    currentUser = { id: user.uid, email: user.email, ...userDoc.data() };
+                    currentUser = { id: user.uid, ...userDoc.data() };
                     localStorage.setItem('beautyBookingUser', JSON.stringify(currentUser));
                 }
             } catch (error) {
-                console.error('Ошибка загрузки данных пользователя:', error);
+                console.error('Ошибка загрузки пользователя:', error);
             }
         } else {
             currentUser = null;
             localStorage.removeItem('beautyBookingUser');
         }
-        
         updateProfileButton();
-        setupUserNavigation();
     });
     
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', function(e) {
             e.preventDefault();
+            const page = this.dataset.page;
             
-            const page = this.getAttribute('data-page');
-            
-            document.querySelectorAll('.nav-link').forEach(navLink => navLink.classList.remove('active'));
-            
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             this.classList.add('active');
             
-            switch(page) {
-                case 'home':
-                    showPage('home-page');
-                    break;
-                case 'salons':
-                    showPage('salons-page');
-                    break;
-                case 'services':
-                    showPage('services-page');
-                    break;
-                case 'masters':
-                    showPage('masters-page');
-                    break;
+            switch (page) {
+                case 'home': showPage('home-page'); break;
+                case 'salons': showPage('salons-page'); break;
+                case 'services': showPage('services-page'); break;
+                case 'masters': showPage('masters-page'); break;
                 case 'profile':
-                    if (currentUser && currentUser.role === 'client') {
-                        showPage('profile-page');
-                    } else {
-                        showModal('profile-modal');
-                    }
+                    if (currentUser?.role === 'client') showPage('profile-page');
+                    else showModal('profile-modal');
                     break;
                 case 'admin':
                     if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'master')) {
@@ -4161,54 +4393,52 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     break;
                 case 'master-schedule':
-                    if (currentUser && currentUser.role === 'master') {
-                        showPage('master-schedule-page');
-                    } else {
-                        showNotification('Доступ только для мастеров', 'error');
-                    }
+                    if (currentUser?.role === 'master') showPage('master-schedule-page');
+                    else showNotification('Доступ только для мастеров', 'error');
                     break;
             }
         });
     });
     
-    document.getElementById('profile-modal-btn')?.addEventListener('click', function() {
-        if (!currentUser) {
-            showModal('profile-modal');
-        }
+    document.getElementById('profile-modal-btn')?.addEventListener('click', () => {
+        if (!currentUser) showModal('profile-modal');
     });
     
     document.getElementById('logout-btn')?.addEventListener('click', logout);
     
-    document.querySelectorAll('.modal-close').forEach(closeBtn => {
-        closeBtn.addEventListener('click', function() {
-            const modal = this.closest('.modal');
-            if (modal) {
-                hideModal(modal.id);
+    document.querySelectorAll('.modal-close').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const modalId = this.closest('.modal').id;
+            hideModal(modalId);
+            clearModalFields(modalId);
+        });
+    });
+    
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', function(e) {
+            if (e.target === this) {
+                hideModal(this.id);
+                clearModalFields(this.id);
             }
         });
     });
     
-
     document.querySelectorAll('.auth-tab').forEach(tab => {
         tab.addEventListener('click', function() {
-            const tabType = this.getAttribute('data-auth-tab');
-            
+            const tabType = this.dataset.authTab;
             document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
-            
             this.classList.add('active');
-            
-            document.querySelectorAll('.auth-form').forEach(form => form.classList.remove('active'));
-            
+            document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
             document.getElementById(`${tabType}-form`).classList.add('active');
         });
     });
     
-    document.getElementById('switch-to-register')?.addEventListener('click', function(e) {
+    document.getElementById('switch-to-register')?.addEventListener('click', (e) => {
         e.preventDefault();
         document.querySelector('.auth-tab[data-auth-tab="register"]').click();
     });
     
-    document.getElementById('switch-to-login')?.addEventListener('click', function(e) {
+    document.getElementById('switch-to-login')?.addEventListener('click', (e) => {
         e.preventDefault();
         document.querySelector('.auth-tab[data-auth-tab="login"]').click();
     });
@@ -4217,492 +4447,278 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('register-btn')?.addEventListener('click', register);
     
     document.getElementById('search-btn')?.addEventListener('click', performSearch);
-    
     document.getElementById('apply-filters')?.addEventListener('click', applyFilters);
     
     document.querySelectorAll('#review-stars i').forEach(star => {
         star.addEventListener('click', function() {
-            selectedRating = parseInt(this.getAttribute('data-rating'));
-            updateRatingDisplay();
-        });
-        
-        star.addEventListener('mouseover', function() {
-            const rating = parseInt(this.getAttribute('data-rating'));
-            document.querySelectorAll('#review-stars i').forEach((s, index) => {
-                s.className = index < rating ? 'fas fa-star' : 'far fa-star';
-            });
-        });
-        
-        star.addEventListener('mouseout', function() {
+            selectedRating = parseInt(this.dataset.rating);
             updateRatingDisplay();
         });
     });
     
     document.querySelectorAll('#master-review-stars i').forEach(star => {
         star.addEventListener('click', function() {
-            selectedMasterRating = parseInt(this.getAttribute('data-rating'));
-            updateMasterRatingDisplay();
-        });
-        star.addEventListener('mouseover', function() {
-            const rating = parseInt(this.getAttribute('data-rating'));
-            document.querySelectorAll('#master-review-stars i').forEach((s, index) => {
-                s.className = index < rating ? 'fas fa-star' : 'far fa-star';
-            });
-        });
-        star.addEventListener('mouseout', function() {
+            selectedMasterRating = parseInt(this.dataset.rating);
             updateMasterRatingDisplay();
         });
     });
-
+    
     document.getElementById('submit-master-review')?.addEventListener('click', submitMasterReview);
-    
     document.getElementById('submit-review')?.addEventListener('click', submitReview);
-    
-    document.addEventListener('click', function(e) {
-        if (e.target.id === 'book-this-salon' || e.target.closest('#book-this-salon')) {
-            startBookingProcess();
-        }
-        
-        if (e.target.id === 'book-this-master' || e.target.closest('#book-this-master')) {
-            startBookingForMaster(selectedMaster.id);
-        }
-        
-        if (e.target.id === 'book-this-service' || e.target.closest('#book-this-service')) {
-            startBookingForService(selectedService.id);
-        }
-    });
     
     document.getElementById('to-step-2')?.addEventListener('click', function() {
         if (!selectedService) {
-            showNotification('Пожалуйста, выберите услугу', 'error');
+            showNotification('Выберите услугу', 'error');
             return;
         }
-        
         goToStep(2);
         loadMastersForBooking();
     });
     
-    document.getElementById('back-to-step-1')?.addEventListener('click', function() {
-        goToStep(1);
-    });
+    document.getElementById('back-to-step-1')?.addEventListener('click', () => goToStep(1));
     
     document.getElementById('to-step-3')?.addEventListener('click', function() {
         if (!selectedMaster) {
-            showNotification('Пожалуйста, выберите мастера', 'error');
+            showNotification('Выберите мастера', 'error');
             return;
         }
-        
         goToStep(3);
         
         const today = new Date().toISOString().split('T')[0];
         const dateInput = document.getElementById('booking-date');
-        
-        if (dateInput) {
-            dateInput.min = today;
-            dateInput.value = today;
-            selectedDate = today;
-            
-            loadTimeSlots(today);
-        }
+        dateInput.min = today;
+        dateInput.value = today;
+        selectedDate = today;
+        loadTimeSlots(today);
     });
     
     document.getElementById('booking-date')?.addEventListener('change', function() {
         selectedDate = this.value;
-        
-        if (selectedMaster) {
-            loadTimeSlots(selectedDate);
-        }
+        if (selectedMaster) loadTimeSlots(selectedDate);
     });
     
-    document.getElementById('back-to-step-2')?.addEventListener('click', function() {
-        goToStep(2);
-    });
+    document.getElementById('back-to-step-2')?.addEventListener('click', () => goToStep(2));
     
     document.getElementById('to-step-4')?.addEventListener('click', function() {
         if (!selectedDate || !selectedTime) {
-            showNotification('Пожалуйста, выберите дату и время', 'error');
+            showNotification('Выберите дату и время', 'error');
             return;
         }
-        
         goToStep(4);
         updateBookingSummary();
         
         if (currentUser) {
-            const nameInput = document.getElementById('client-name');
-            const lastnameInput = document.getElementById('client-lastname');
-            const phoneInput = document.getElementById('client-phone');
-            
-            if (nameInput && currentUser.name) nameInput.value = currentUser.name;
-            if (lastnameInput && currentUser.lastname) lastnameInput.value = currentUser.lastname;
-            if (phoneInput && currentUser.phone) phoneInput.value = currentUser.phone;
+            document.getElementById('client-name').value = currentUser.name || '';
+            document.getElementById('client-lastname').value = currentUser.lastname || '';
+            document.getElementById('client-phone').value = currentUser.phone || '';
         }
     });
     
-    document.getElementById('back-to-step-3')?.addEventListener('click', function() {
-        goToStep(3);
-    });
-    
+    document.getElementById('back-to-step-3')?.addEventListener('click', () => goToStep(3));
     document.getElementById('confirm-booking')?.addEventListener('click', confirmBooking);
     
     document.addEventListener('click', function(e) {
         if (e.target.closest('.mode-btn')) {
             const btn = e.target.closest('.mode-btn');
-            const mode = btn.getAttribute('data-mode');
+            const mode = btn.dataset.mode;
             
-            const masterModeVisible = document.getElementById('master-mode')?.style.display === 'block';
-            const adminModeVisible = document.getElementById('admin-mode')?.style.display === 'block';
-            
-            e.preventDefault();
-            e.stopPropagation();
-            
-            if (masterModeVisible && (mode === 'master-bookings' || mode === 'master-actions-history')) {
+            if (['master-bookings', 'master-actions-history', 'master-services'].includes(mode)) {
                 document.querySelectorAll('#master-mode .mode-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 
-                document.getElementById('master-bookings-mode').style.display = 'none';
-                document.getElementById('master-actions-history-mode').style.display = 'none';
+                document.getElementById('master-bookings-mode').style.display = mode === 'master-bookings' ? 'block' : 'none';
+                document.getElementById('master-actions-history-mode').style.display = mode === 'master-actions-history' ? 'block' : 'none';
+                document.getElementById('master-services-mode').style.display = mode === 'master-services' ? 'block' : 'none';
                 
-                if (mode === 'master-bookings') {
-                    document.getElementById('master-bookings-mode').style.display = 'block';
-                    if (currentActiveMasterId) {
-                        loadMasterBookingsForMaster(currentActiveMasterId);
-                    }
-                } else if (mode === 'master-actions-history') {
-                    document.getElementById('master-actions-history-mode').style.display = 'block';
-                    loadMasterActionsHistory();
-                }
-            }
-            
-            else if (mode && (mode === 'admin' || mode === 'actions-history' || mode === 'reviews-management' || mode === 'users-management')) {
+                if (mode === 'master-actions-history') loadMasterActionsHistory();
+                if (mode === 'master-services' && currentActiveMasterId) loadMasterServicesList(currentActiveMasterId);
+            } else if (['admin', 'actions-history', 'reviews-management', 'users-management', 'master-requests'].includes(mode)) {
                 document.querySelectorAll('#admin-mode-switcher .mode-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 
-                document.querySelectorAll('.admin-content').forEach(content => {
-                    if (content.id !== 'master-mode') {
-                        content.style.display = 'none';
-                    }
-                });
+                document.getElementById('admin-mode').style.display = mode === 'admin' ? 'block' : 'none';
+                document.getElementById('actions-history-mode').style.display = mode === 'actions-history' ? 'block' : 'none';
+                document.getElementById('reviews-management-mode').style.display = mode === 'reviews-management' ? 'block' : 'none';
+                document.getElementById('users-management-mode').style.display = mode === 'users-management' ? 'block' : 'none';
+                document.getElementById('master-requests-mode').style.display = mode === 'master-requests' ? 'block' : 'none';
                 
-                if (mode === 'admin') {
-                    document.getElementById('admin-mode').style.display = 'block';
-                } else if (mode === 'actions-history') {
-                    document.getElementById('actions-history-mode').style.display = 'block';
-                    loadActionsHistory();
-                } else if (mode === 'reviews-management') {
-                    document.getElementById('reviews-management-mode').style.display = 'block';
+                if (mode === 'actions-history') loadActionsHistory();
+                if (mode === 'reviews-management') {
                     populateSalonFilterForReviews();
                     loadReviewsManagement();
-                } else if (mode === 'users-management') {
-                    document.getElementById('users-management-mode').style.display = 'block';
-                    updateAdminTables();
                 }
+                if (mode === 'master-requests') loadMasterRequests();
             }
         }
     });
-
+    
     document.getElementById('add-salon-btn')?.addEventListener('click', function() {
         resetSalonForm();
+        loadSalonServicesCheckboxes([]);
         showModal('add-salon-modal');
     });
-
+    
     document.getElementById('add-service-admin-btn')?.addEventListener('click', function() {
         resetServiceForm();
-        loadSelectOptions();
         showModal('add-service-modal');
     });
-
+    
     document.getElementById('add-master-btn')?.addEventListener('click', function() {
         resetMasterForm();
         loadSelectOptions();
         showModal('add-master-modal');
     });
-
-    document.getElementById('apply-review-filter')?.addEventListener('click', function() {
-        loadReviewsManagement();
-    });
     
+    document.getElementById('apply-review-filter')?.addEventListener('click', loadReviewsManagement);
     document.getElementById('refresh-history')?.addEventListener('click', loadActionsHistory);
-    
     document.getElementById('clear-history')?.addEventListener('click', clearActionsHistory);
     
     document.getElementById('save-salon')?.addEventListener('click', addSalon);
-    document.getElementById('cancel-salon')?.addEventListener('click', function() {
-        hideModal('add-salon-modal');
-        resetSalonForm();
-    });
-    document.getElementById('add-salon-modal-close')?.addEventListener('click', function() {
-        hideModal('add-salon-modal');
-        resetSalonForm();
-    });
-    
     document.getElementById('save-service')?.addEventListener('click', addService);
-    document.getElementById('cancel-service')?.addEventListener('click', function() {
-        hideModal('add-service-modal');
-        resetServiceForm();
-    });
-    document.getElementById('add-service-modal-close')?.addEventListener('click', function() {
-        hideModal('add-service-modal');
-        resetServiceForm();
-    });
-    
     document.getElementById('save-master')?.addEventListener('click', addMaster);
-    document.getElementById('cancel-master')?.addEventListener('click', function() {
-        hideModal('add-master-modal');
-        resetMasterForm();
-    });
-    document.getElementById('add-master-modal-close')?.addEventListener('click', function() {
-        hideModal('add-master-modal');
-        resetMasterForm();
-    });
-    
     document.getElementById('save-edit-user')?.addEventListener('click', saveUser);
-    document.getElementById('cancel-edit-user')?.addEventListener('click', function() {
-        hideModal('edit-user-modal');
-        resetUserForm();
+    document.getElementById('save-edit-master')?.addEventListener('click', saveMasterProfile);
+    
+    document.getElementById('cancel-salon')?.addEventListener('click', () => {
+        hideModal('add-salon-modal');
+        resetSalonForm();
     });
-    document.getElementById('edit-user-modal-close')?.addEventListener('click', function() {
-        hideModal('edit-user-modal');
-        resetUserForm();
+    document.getElementById('cancel-service')?.addEventListener('click', () => {
+        hideModal('add-service-modal');
+        resetServiceForm();
     });
+    document.getElementById('cancel-master')?.addEventListener('click', () => {
+        hideModal('add-master-modal');
+        resetMasterForm();
+    });
+    document.getElementById('cancel-edit-user')?.addEventListener('click', () => hideModal('edit-user-modal'));
+    document.getElementById('cancel-edit-master')?.addEventListener('click', () => hideModal('edit-master-modal'));
+    document.getElementById('reset-user-password-btn')?.addEventListener('click', resetUserPassword);
     
     document.getElementById('edit-master-profile')?.addEventListener('click', editMasterProfile);
     document.getElementById('delete-master-profile')?.addEventListener('click', deleteMasterProfile);
-    document.getElementById('save-edit-master')?.addEventListener('click', saveMasterProfile);
-    document.getElementById('cancel-edit-master')?.addEventListener('click', function() {
-        hideModal('edit-master-modal');
+    document.getElementById('refresh-master-bookings')?.addEventListener('click', function() {
+        if (currentActiveMasterId) loadMasterBookingsForMaster(currentActiveMasterId);
     });
-    document.getElementById('edit-master-modal-close')?.addEventListener('click', function() {
-        hideModal('edit-master-modal');
-    });
+    
+    document.getElementById('add-master-service-btn')?.addEventListener('click', openAddMasterServiceModal);
+    document.getElementById('confirm-add-master-service')?.addEventListener('click', addServiceToMasterFromModal);
+    document.getElementById('cancel-add-master-service')?.addEventListener('click', () => hideModal('add-master-service-modal'));
+    document.getElementById('add-master-service-modal-close')?.addEventListener('click', () => hideModal('add-master-service-modal'));
     
     document.getElementById('prev-month')?.addEventListener('click', prevMonth);
     document.getElementById('next-month')?.addEventListener('click', nextMonth);
     
     document.getElementById('client-phone')?.addEventListener('input', function(e) {
-        let value = this.value.replace(/\D/g, '');
-        if (value.length > 0) {
-            if (value[0] === '7' || value[0] === '8') value = value.substring(1);
-            let formattedValue = '+7 ';
-            if (value.length > 0) formattedValue += '(' + value.substring(0, 3);
-            if (value.length >= 4) formattedValue += ') ' + value.substring(3, 6);
-            if (value.length >= 7) formattedValue += '-' + value.substring(6, 8);
-            if (value.length >= 9) formattedValue += '-' + value.substring(8, 10);
-            this.value = formattedValue;
-        }
+        formatPhone(this);
     });
-    
     document.getElementById('register-phone')?.addEventListener('input', function(e) {
-        let value = this.value.replace(/\D/g, '');
-        if (value.length > 0) {
-            if (value[0] === '7' || value[0] === '8') value = value.substring(1);
-            let formattedValue = '+7 ';
-            if (value.length > 0) formattedValue += '(' + value.substring(0, 3);
-            if (value.length >= 4) formattedValue += ') ' + value.substring(3, 6);
-            if (value.length >= 7) formattedValue += '-' + value.substring(6, 8);
-            if (value.length >= 9) formattedValue += '-' + value.substring(8, 10);
-            this.value = formattedValue;
-        }
+        formatPhone(this);
+    });
+    document.getElementById('edit-master-phone')?.addEventListener('input', function(e) {
+        formatPhone(this);
+    });
+    document.getElementById('edit-user-phone')?.addEventListener('input', function(e) {
+        formatPhone(this);
     });
     
-    const salonFileInput = document.getElementById('salon-image-upload');
-    const salonUrlInput = document.getElementById('salon-image-url');
-    const salonPreview = document.getElementById('salon-image-preview');
+    setupImagePreview('salon');
+    setupImagePreview('service');
+    setupImagePreview('master');
     
-    if (salonFileInput) {
-        salonFileInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(ev) {
-                    if (salonPreview) salonPreview.innerHTML = `<img src="${ev.target.result}" style="max-width: 200px; max-height: 200px;">`;
-                };
-                reader.readAsDataURL(file);
-                if (salonUrlInput) salonUrlInput.value = '';
-            }
-        });
-    }
-    
-    if (salonUrlInput) {
-        salonUrlInput.addEventListener('input', function(e) {
-            const url = e.target.value.trim();
-            if (url) {
-                if (salonPreview) salonPreview.innerHTML = `<img src="${url}" style="max-width: 200px; max-height: 200px;" onerror="this.style.display='none'">`;
-                if (salonFileInput) salonFileInput.value = '';
-            } else {
-                if (salonPreview) salonPreview.innerHTML = '';
-            }
-        });
-    }
-    
-    const serviceFileInput = document.getElementById('service-image-upload');
-    const serviceUrlInput = document.getElementById('service-image-url');
-    const servicePreview = document.getElementById('service-image-preview');
-    
-    if (serviceFileInput) {
-        serviceFileInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(ev) {
-                    if (servicePreview) servicePreview.innerHTML = `<img src="${ev.target.result}" style="max-width: 200px; max-height: 200px;">`;
-                };
-                reader.readAsDataURL(file);
-                if (serviceUrlInput) serviceUrlInput.value = '';
-            }
-        });
-    }
-    
-    if (serviceUrlInput) {
-        serviceUrlInput.addEventListener('input', function(e) {
-            const url = e.target.value.trim();
-            if (url) {
-                if (servicePreview) servicePreview.innerHTML = `<img src="${url}" style="max-width: 200px; max-height: 200px;" onerror="this.style.display='none'">`;
-                if (serviceFileInput) serviceFileInput.value = '';
-            } else {
-                if (servicePreview) servicePreview.innerHTML = '';
-            }
-        });
-    }
-    
-    const masterFileInput = document.getElementById('master-image-upload');
-    const masterUrlInput = document.getElementById('master-image-url');
-    const masterPreview = document.getElementById('master-image-preview');
-    
-    if (masterFileInput) {
-        masterFileInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(ev) {
-                    if (masterPreview) masterPreview.innerHTML = `<img src="${ev.target.result}" style="max-width: 200px; max-height: 200px;">`;
-                };
-                reader.readAsDataURL(file);
-                if (masterUrlInput) masterUrlInput.value = '';
-            }
-        });
-    }
-    
-    if (masterUrlInput) {
-        masterUrlInput.addEventListener('input', function(e) {
-            const url = e.target.value.trim();
-            if (url) {
-                if (masterPreview) masterPreview.innerHTML = `<img src="${url}" style="max-width: 200px; max-height: 200px;" onerror="this.style.display='none'">`;
-                if (masterFileInput) masterFileInput.value = '';
-            } else {
-                if (masterPreview) masterPreview.innerHTML = '';
-            }
-        });
-    }
-    
-    document.getElementById('switch-master-btn')?.addEventListener('click', function() {
+    document.getElementById('switch-master-btn')?.addEventListener('click', async function() {
         const select = document.getElementById('master-select');
         const selectedMasterId = select.value;
         
         if (!selectedMasterId) {
-            showNotification('Выберите мастера из списка', 'warning');
+            showNotification('Выберите мастера', 'warning');
             return;
         }
         
-        window.selectedMasterForSwitch = selectedMasterId;
-        showModal('switch-master-password-modal');
-    });
-    
-    document.getElementById('cancel-switch-master')?.addEventListener('click', function() {
-        hideModal('switch-master-password-modal');
-        document.getElementById('switch-master-password').value = '';
-    });
-    
-    document.getElementById('switch-master-modal-close')?.addEventListener('click', function() {
-        hideModal('switch-master-password-modal');
-        document.getElementById('switch-master-password').value = '';
-    });
-    
-    document.getElementById('confirm-switch-master')?.addEventListener('click', async function() {
-        const passwordInput = document.getElementById('switch-master-password');
-        const enteredPassword = passwordInput.value.trim();
-        
-        if (!enteredPassword) {
-            showNotification('Введите пароль', 'error');
-            return;
-        }
-        
-        const select = document.getElementById('master-select');
-        const selectedIndex = select.selectedIndex;
-        const masterIndex = selectedIndex - 1;
-        
-        if (masterIndex < 0) {
-            showNotification('Ошибка выбора мастера', 'error');
-            return;
-        }
-        
-        const expectedPassword = (masterIndex + 1).toString();
-        
-        if (enteredPassword !== expectedPassword) {
-            showNotification('Неверный пароль', 'error');
-            return;
-        }
-        
-        const masterId = select.value;
+        currentActiveMasterId = selectedMasterId;
         
         try {
-            const masterDoc = await db.collection('masters').doc(masterId).get();
+            const masterDoc = await db.collection('masters').doc(selectedMasterId).get();
             if (masterDoc.exists) {
                 const master = masterDoc.data();
-                currentActiveMasterId = masterId;
+                
+                let salonName = 'Неизвестно';
+                if (master.salonId) {
+                    const salonDoc = await db.collection('salons').doc(master.salonId).get();
+                    if (salonDoc.exists) salonName = salonDoc.data().name;
+                }
                 
                 document.getElementById('master-detail-name').textContent = master.name || '';
                 document.getElementById('master-detail-specialization').textContent = master.specialization || 'Не указана';
-                document.getElementById('master-detail-salon').textContent = master.salonName || 'Неизвестно';
+                document.getElementById('master-detail-salon').textContent = salonName;
                 
-                await loadMasterBookingsForMaster(masterId);
+                await loadMasterBookingsForMaster(master.id);
+                await loadMasterServicesList(master.id);
                 showNotification(`Переключено на мастера ${master.name}`, 'success');
             }
         } catch (error) {
-            console.error('Ошибка при переключении мастера:', error);
-            showNotification('Ошибка при загрузке данных мастера', 'error');
-        } finally {
-            hideModal('switch-master-password-modal');
-            passwordInput.value = '';
+            console.error('Ошибка переключения мастера:', error);
+            showNotification('Ошибка при переключении', 'error');
         }
     });
     
-    initializeSalonRatings();
-    
-    if (currentUser && currentUser.role === 'admin') {
-        loadAdminStats();
-    }
-    
-    console.log('Приложение инициализировано');
-});
-
-// ==============================================
-// ДОПОЛНИТЕЛЬНЫЕ ОБРАБОТЧИКИ
-// ==============================================
-
-document.querySelectorAll('.admin-mode-switcher .mode-btn').forEach(btn => {
-    btn.addEventListener('click', function(e) {
-        e.stopPropagation();
+    document.getElementById('become-master-btn')?.addEventListener('click', async function() {
+        if (!currentUser || currentUser.role !== 'client') {
+            showNotification('Только клиенты могут подавать заявки', 'error');
+            return;
+        }
+        await loadSelectOptions();
+        showModal('master-request-modal');
     });
+    
+    document.getElementById('submit-master-request')?.addEventListener('click', submitMasterRequest);
+    document.getElementById('cancel-master-request')?.addEventListener('click', () => hideModal('master-request-modal'));
+    
+    document.getElementById('master-specialization').addEventListener('change', function(e) {
+        const otherGroup = document.getElementById('master-specialization-other-group');
+        if (this.value === 'other') {
+            otherGroup.style.display = 'block';
+            document.getElementById('master-specialization-other').required = true;
+        } else {
+            otherGroup.style.display = 'none';
+            document.getElementById('master-specialization-other').required = false;
+        }
+    });
+    
+    document.getElementById('master-salon').addEventListener('change', async function(e) {
+        const salonId = e.target.value;
+        await updateMasterServicesCheckboxes(salonId, []);
+        updateMasterPriceFromCheckboxes();
+    });
+    
+    document.getElementById('add-new-service-btn')?.addEventListener('click', function() {
+        const salonId = document.getElementById('master-salon').value;
+        if (!salonId) {
+            showNotification('Сначала выберите салон', 'error');
+            return;
+        }
+        showModal('add-new-service-modal');
+    });
+    
+    document.getElementById('confirm-add-new-service')?.addEventListener('click', addNewServiceForMaster);
+    document.getElementById('cancel-new-service')?.addEventListener('click', () => hideModal('add-new-service-modal'));
+    
+    window.addEventListener('resize', updateServicesContainerHeight);
+    setTimeout(updateServicesContainerHeight, 500);
+    
+    ensureAdminExists();
+    
+    showPageFromHash();
+    
+    setInterval(clearCache, CACHE_TTL);
 });
 
 document.querySelector('.logo')?.addEventListener('click', function(e) {
     e.preventDefault();
     showPage('home-page');
     document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
-    document.querySelector('.nav-link[data-page="home"]').classList.add('active');
-});
-
-// ==============================================
-// ВОССТАНОВЛЕНИЕ АДМИНА
-// ==============================================
-ensureAdminExists();
-
-// ==============================================
-// ФИНАЛЬНАЯ ИНИЦИАЛИЗАЦИЯ
-// ==============================================
-
-window.addEventListener('load', function() {
-    console.log('Страница полностью загружена');
+    const homeLink = document.querySelector('.nav-link[data-page="home"]');
+    if (homeLink) homeLink.classList.add('active');
 });
 
 window.addEventListener('error', function(e) {
@@ -4712,3 +4728,48 @@ window.addEventListener('error', function(e) {
 window.addEventListener('unhandledrejection', function(e) {
     console.error('Необработанное обещание:', e.reason);
 });
+
+function formatPhone(input) {
+    let value = input.value.replace(/\D/g, '');
+    if (value.length > 0) {
+        if (value[0] === '7' || value[0] === '8') value = value.substring(1);
+        let formatted = '+7 ';
+        if (value.length > 0) formatted += '(' + value.substring(0, 3);
+        if (value.length >= 4) formatted += ') ' + value.substring(3, 6);
+        if (value.length >= 7) formatted += '-' + value.substring(6, 8);
+        if (value.length >= 9) formatted += '-' + value.substring(8, 10);
+        input.value = formatted;
+    }
+}
+
+function setupImagePreview(type) {
+    const fileInput = document.getElementById(`${type}-image-upload`);
+    const urlInput = document.getElementById(`${type}-image-url`);
+    const preview = document.getElementById(`${type}-image-preview`);
+    
+    if (fileInput) {
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(ev) {
+                    if (preview) preview.innerHTML = `<img src="${ev.target.result}" style="max-width: 200px;">`;
+                };
+                reader.readAsDataURL(file);
+                if (urlInput) urlInput.value = '';
+            }
+        });
+    }
+    
+    if (urlInput) {
+        urlInput.addEventListener('input', function(e) {
+            const url = e.target.value.trim();
+            if (url) {
+                if (preview) preview.innerHTML = `<img src="${url}" style="max-width: 200px;">`;
+                if (fileInput) fileInput.value = '';
+            } else {
+                if (preview) preview.innerHTML = '';
+            }
+        });
+    }
+}

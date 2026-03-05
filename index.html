@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BeautyBooking | Бронирование услуг салонов красоты</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <!-- Уведомления -->
@@ -56,8 +56,7 @@
                     <div class="search-container">
                         <div class="search-input-wrapper">
                             <i class="fas fa-search"></i>
-                            <!-- ИСПРАВЛЕНО: type="search", добавлены атрибуты -->
-                            <input type="search" id="global-search" name="q" placeholder="Искать салоны, услуги, мастеров..." autocomplete="off" spellcheck="false" readonly>
+                            <input type="search" id="global-search" name="q" placeholder="Искать салоны, услуги, мастеров..." autocomplete="off" spellcheck="false" autocapitalize="none" autocorrect="off">
                             <button class="btn-search" id="search-btn">
                                 <i class="fas fa-search"></i> Найти
                             </button>
@@ -67,43 +66,8 @@
             </div>
         </div>
         <div class="container">
-            <div class="advanced-filters">
-                <h3>Расширенный поиск</h3>
-                <div class="filters-panel">
-                    <div class="filter-group">
-                        <label for="filter-type">Тип поиска:</label>
-                        <select id="filter-type" class="filter-select">
-                            <option value="all">Все</option>
-                            <option value="salon">Только салоны</option>
-                            <option value="master">Только мастера</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label for="filter-rating">Рейтинг:</label>
-                        <select id="filter-rating" class="filter-select">
-                            <option value="all">Все рейтинги</option>
-                            <option value="5">5 звёзд</option>
-                            <option value="4.5">4.5+ звезды</option>
-                            <option value="4">4+ звезды</option>
-                            <option value="3">3+ звезды</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label for="filter-specialization">Специализация:</label>
-                        <select id="filter-specialization" class="filter-select">
-                            <option value="all">Все специализации</option>
-                            <option value="hair">Парикмахерские</option>
-                            <option value="nails">Ногтевой сервис</option>
-                            <option value="cosmetology">Косметология</option>
-                            <option value="massage">Массаж</option>
-                            <option value="barber">Барбершоп</option>
-                        </select>
-                    </div>
-                    <button class="btn-filter-apply" id="apply-filters">
-                        <i class="fas fa-filter"></i> Применить фильтры
-                    </button>
-                </div>
-            </div>
+            <!-- Расширенные фильтры скрыты, но оставлены для совместимости -->
+            <div class="advanced-filters" style="display: none;"></div>
             <div class="recommendations-section">
                 <h2 class="section-title">Рекомендуем для вас</h2>
                 <div id="recommendations-container" class="salons-grid"></div>
@@ -385,7 +349,7 @@
         </div>
     </section>
 
-    <!-- Админ-панель (поиск удалён) -->
+    <!-- Админ-панель -->
     <section id="admin-page" class="page">
         <div class="container">
             <h1 class="page-title" id="admin-page-title">Админ-панель</h1>
@@ -394,6 +358,7 @@
                 <button class="mode-btn" data-mode="actions-history">История действий</button>
                 <button class="mode-btn" data-mode="reviews-management">Управление отзывами</button>
                 <button class="mode-btn" data-mode="users-management">Управление пользователями</button>
+                <button class="mode-btn" data-mode="master-requests">Заявки мастеров</button>
             </div>
 
             <!-- Режим администратора -->
@@ -404,7 +369,8 @@
                     <button class="btn" id="add-service-admin-btn">Добавить услугу</button>
                     <button class="btn" id="add-master-btn">Добавить мастера</button>
                 </div>
-                <!-- УДАЛЁН блок с поиском по таблицам -->
+                
+                <!-- Управление салонами -->
                 <div class="admin-section">
                     <h2>Управление салонами</h2>
                     <div class="data-table-container">
@@ -421,23 +387,17 @@
                         </table>
                     </div>
                 </div>
+                
+                <!-- Управление услугами -->
                 <div class="admin-section">
                     <h2>Управление услугами</h2>
-                    <div class="data-table-container">
-                        <table class="data-table" id="services-table">
-                            <thead>
-                                <tr>
-                                    <th>Название</th>
-                                    <th>Категория</th>
-                                    <th>Цена</th>
-                                    <th>Салон</th>
-                                    <th>Действия</th>
-                                </tr>
-                            </thead>
-                            <tbody id="services-table-body"></tbody>
-                        </table>
+                    <div class="data-table-container" style="max-height: 500px; overflow-y: auto; margin-bottom: 20px; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 15px;">
+                        <div class="services-grid" id="admin-services-grid"></div>
                     </div>
+                    <button class="btn" id="add-service-admin-btn" style="margin-top: 10px;">Добавить услугу</button>
                 </div>
+                
+                <!-- Управление мастерами -->
                 <div class="admin-section">
                     <h2>Управление мастерами</h2>
                     <div class="data-table-container">
@@ -455,6 +415,8 @@
                         </table>
                     </div>
                 </div>
+                
+                <!-- Все записи клиентов -->
                 <div class="admin-section">
                     <h2>Все записи клиентов</h2>
                     <div class="data-table-container">
@@ -504,7 +466,6 @@
                             </select>
                         </div>
                         <button class="btn" id="refresh-history">Обновить</button>
-                        <!-- КНОПКА: Очистить всю историю -->
                         <button class="btn btn-danger" id="clear-history">Очистить всю историю</button>
                     </div>
                     <div class="data-table-container">
@@ -524,7 +485,7 @@
                 </div>
             </div>
 
-            <!-- Управление отзывами (с фильтром по салону) -->
+            <!-- Управление отзывами -->
             <div id="reviews-management-mode" class="admin-content" style="display: none;">
                 <div class="admin-section">
                     <h2>Управление отзывами</h2>
@@ -533,7 +494,6 @@
                             <label for="review-salon-filter">Салон:</label>
                             <select id="review-salon-filter" class="filter-select">
                                 <option value="all">Все салоны</option>
-                                <!-- Опции будут добавлены динамически -->
                             </select>
                         </div>
                         <button class="btn" id="apply-review-filter">Применить фильтр</button>
@@ -578,7 +538,30 @@
                 </div>
             </div>
 
-            <!-- Режим мастера (Мини-CRM) -->
+            <!-- Заявки мастеров -->
+            <div id="master-requests-mode" class="admin-content" style="display: none;">
+                <div class="admin-section">
+                    <h2>Заявки на становление мастером</h2>
+                    <div class="data-table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Пользователь</th>
+                                    <th>Email</th>
+                                    <th>Салон</th>
+                                    <th>Специализация</th>
+                                    <th>Дата</th>
+                                    <th>Статус</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="master-requests-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Режим мастера -->
             <div id="master-mode" class="admin-content" style="display: none;">
                 <div class="master-panel">
                     <div class="master-info-card">
@@ -618,7 +601,7 @@
                             </button>
                         </div>
                     </div>
-                    <!-- БЛОК: переключение между мастерами -->
+                    
                     <div class="master-switcher">
                         <label for="master-select">Переключение между мастерами:</label>
                         <div style="display: flex; gap: 10px; align-items: center;">
@@ -628,13 +611,18 @@
                             <button class="btn btn-secondary" id="switch-master-btn">Переключиться</button>
                         </div>
                     </div>
+                    
                     <div class="admin-mode-switcher">
                         <button class="mode-btn active" data-mode="master-bookings">Мои записи</button>
                         <button class="mode-btn" data-mode="master-actions-history">История действий</button>
+                        <button class="mode-btn" data-mode="master-services">Мои услуги</button>
                     </div>
-                    <!-- Мои записи -->
+                    
                     <div id="master-bookings-mode" class="admin-section">
                         <h2>Мои записи</h2>
+                        <div style="margin-bottom: 20px;">
+                            <button class="btn btn-secondary" id="refresh-master-bookings"><i class="fas fa-sync-alt"></i> Обновить</button>
+                        </div>
                         <div class="data-table-container">
                             <table class="data-table">
                                 <thead>
@@ -652,7 +640,7 @@
                             </table>
                         </div>
                     </div>
-                    <!-- История действий мастера -->
+                    
                     <div id="master-actions-history-mode" class="admin-content" style="display: none;">
                         <div class="admin-section">
                             <h2>История моих действий</h2>
@@ -671,6 +659,16 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <div id="master-services-mode" class="admin-section" style="display: none;">
+                        <h2>Мои услуги</h2>
+                        <div style="margin-bottom: 20px;">
+                            <button class="btn" id="add-master-service-btn"><i class="fas fa-plus"></i> Добавить услугу</button>
+                        </div>
+                        <div class="data-table-container" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 15px;">
+                            <div id="master-services-list" class="services-grid"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -681,6 +679,10 @@
         <div class="container">
             <h1 class="page-title">Мои записи</h1>
             <div id="user-bookings-container"></div>
+            <!-- Кнопка "Стать мастером" для клиентов -->
+            <div id="become-master-container" style="margin-top: 30px; text-align: center;">
+                <button class="btn" id="become-master-btn"><i class="fas fa-user-graduate"></i> Стать мастером</button>
+            </div>
         </div>
     </section>
 
@@ -761,12 +763,6 @@
                     <input class="form-input phone-input" type="tel" id="register-phone" placeholder="+7 (___) ___-__-__">
                 </div>
                 <div class="form-group">
-                    <label class="form-label" for="register-role">Роль</label>
-                    <select class="form-input" id="register-role">
-                        <option value="client">Клиент</option>
-                    </select>
-                </div>
-                <div class="form-group">
                     <button class="btn" id="register-btn">Зарегистрироваться</button>
                 </div>
                 <div class="auth-switch">
@@ -809,6 +805,12 @@
                     <label><input type="checkbox" name="specialization" value="massage"> Массаж</label>
                     <label><input type="checkbox" name="specialization" value="barber"> Барбершоп</label>
                 </div>
+            </div>
+            <!-- Чекбоксы услуг для салона -->
+            <div class="form-group">
+                <label class="form-label">Услуги салона</label>
+                <div id="salon-services-checkboxes" class="checkbox-group"></div>
+                <small>Выберите услуги, которые предоставляет салон (можно несколько).</small>
             </div>
             <div class="form-group">
                 <label class="form-label" for="salon-description">Описание</label>
@@ -854,12 +856,14 @@
                 <input class="form-input" type="number" id="service-price" placeholder="Введите цену">
             </div>
             <div class="form-group">
-                <label class="form-label" for="service-salon">Салон</label>
-                <select class="form-input" id="service-salon"></select>
-            </div>
-            <div class="form-group">
                 <label class="form-label" for="service-duration">Длительность (минут)</label>
                 <input class="form-input" type="number" id="service-duration" placeholder="60" value="60">
+            </div>
+            <!-- Чекбоксы салонов для услуги -->
+            <div class="form-group">
+                <label class="form-label">Доступен в салонах</label>
+                <div id="service-salons-checkboxes" class="checkbox-group"></div>
+                <small>Отметьте салоны, в которых предоставляется эта услуга.</small>
             </div>
             <div class="form-group">
                 <label class="form-label" for="service-image-upload">Изображение услуги</label>
@@ -883,13 +887,17 @@
             <button class="modal-close" id="add-master-modal-close">&times;</button>
             <h2 class="modal-title" id="master-modal-title">Добавить мастера</h2>
             <div class="form-group">
-                <label class="form-label" for="master-name">Имя мастера</label>
-                <input class="form-input" type="text" id="master-name" placeholder="Введите имя мастера">
+                <label class="form-label" for="master-name">Имя *</label>
+                <input class="form-input" type="text" id="master-name" placeholder="Иван" required>
             </div>
             <div class="form-group">
-                <label class="form-label" for="master-specialization">Специализация</label>
-                <select class="form-input" id="master-specialization">
-                    <option value="">Выберите специализацию</option>
+                <label class="form-label" for="master-lastname">Фамилия *</label>
+                <input class="form-input" type="text" id="master-lastname" placeholder="Петров" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="master-specialization">Специализация *</label>
+                <select class="form-input" id="master-specialization" required>
+                    <option value="">-- Выберите специализацию --</option>
                     <option value="Парикмахер">Парикмахер</option>
                     <option value="Мастер маникюра">Мастер маникюра</option>
                     <option value="Косметолог">Косметолог</option>
@@ -900,23 +908,41 @@
                     <option value="Лешмейкер">Лешмейкер</option>
                     <option value="Эстетист">Эстетист</option>
                     <option value="Подолог">Подолог</option>
+                    <option value="other">✨ Другое (ввести вручную)</option>
                 </select>
+            </div>
+            <div class="form-group" id="master-specialization-other-group" style="display: none;">
+                <label class="form-label" for="master-specialization-other">Укажите специализацию</label>
+                <input class="form-input" type="text" id="master-specialization-other" placeholder="например, Трихолог">
             </div>
             <div class="form-group">
                 <label class="form-label" for="master-price">Средняя цена (руб.)</label>
-                <input class="form-input" type="number" id="master-price" placeholder="Введите среднюю цену">
+                <input class="form-input" type="number" id="master-price" readonly placeholder="Рассчитывается автоматически">
             </div>
             <div class="form-group">
-                <label class="form-label" for="master-salon">Салон</label>
-                <select class="form-input" id="master-salon"></select>
+                <label class="form-label" for="master-salon">Салон *</label>
+                <select class="form-input" id="master-salon" required>
+                    <option value="">-- Выберите салон --</option>
+                </select>
+            </div>
+            <!-- Чекбоксы услуг для мастера -->
+            <div class="form-group">
+                <label class="form-label">Услуги мастера</label>
+                <div id="master-services-checkboxes" class="checkbox-group"></div>
+                <small>Выберите услуги, которые предоставляет мастер. Средняя цена будет рассчитана автоматически.</small>
+            </div>
+            <div class="form-group" style="text-align: right;">
+                <button type="button" class="btn btn-secondary" id="add-new-service-btn">
+                    <i class="fas fa-plus"></i> Добавить новую услугу
+                </button>
             </div>
             <div class="form-group">
-                <label class="form-label" for="master-email">Email (для входа)</label>
-                <input class="form-input" type="email" id="master-email" placeholder="master@example.com">
+                <label class="form-label" for="master-email">Email (для входа) *</label>
+                <input class="form-input" type="email" id="master-email" placeholder="master@example.com" autocomplete="off" required>
             </div>
             <div class="form-group">
-                <label class="form-label" for="master-password">Пароль</label>
-                <input class="form-input" type="password" id="master-password" placeholder="Введите пароль">
+                <label class="form-label" for="master-password">Пароль *</label>
+                <input class="form-input" type="password" id="master-password" placeholder="минимум 6 символов" autocomplete="new-password" required>
             </div>
             <div class="form-group">
                 <label class="form-label" for="master-image-upload">Фото мастера</label>
@@ -930,6 +956,40 @@
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="cancel-master">Отмена</button>
                 <button class="btn" id="save-master">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно для добавления новой услуги -->
+    <div id="add-new-service-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" id="add-new-service-modal-close">&times;</button>
+            <h2 class="modal-title">Добавить новую услугу</h2>
+            <div class="form-group">
+                <label class="form-label" for="new-service-name">Название услуги *</label>
+                <input class="form-input" type="text" id="new-service-name" placeholder="например, Стрижка">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="new-service-category">Категория *</label>
+                <select class="form-input" id="new-service-category">
+                    <option value="hair">Парикмахерские услуги</option>
+                    <option value="nails">Ногтевой сервис</option>
+                    <option value="cosmetology">Косметология</option>
+                    <option value="massage">Массаж</option>
+                    <option value="barber">Барбершоп</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="new-service-price">Цена (руб.) *</label>
+                <input class="form-input" type="number" id="new-service-price" placeholder="1000">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="new-service-duration">Длительность (мин) *</label>
+                <input class="form-input" type="number" id="new-service-duration" placeholder="60" value="60">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancel-new-service">Отмена</button>
+                <button class="btn" id="confirm-add-new-service">Добавить</button>
             </div>
         </div>
     </div>
@@ -1010,14 +1070,17 @@
                     <option value="admin">Администратор</option>
                 </select>
             </div>
-            <div class="modal-actions">
+            <div class="modal-actions" style="justify-content: space-between;">
                 <button class="btn btn-secondary" id="cancel-edit-user">Отмена</button>
-                <button class="btn" id="save-edit-user">Сохранить изменения</button>
+                <div>
+                    <button class="btn btn-secondary" id="reset-user-password-btn" style="margin-right: 10px;">Сбросить пароль</button>
+                    <button class="btn" id="save-edit-user">Сохранить изменения</button>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- МОДАЛЬНОЕ ОКНО: ввод пароля при переключении мастера -->
+    <!-- Модальное окно: ввод пароля при переключении мастера (не используется, но оставлено для совместимости) -->
     <div id="switch-master-password-modal" class="modal">
         <div class="modal-content">
             <button class="modal-close" id="switch-master-modal-close">&times;</button>
@@ -1029,6 +1092,67 @@
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="cancel-switch-master">Отмена</button>
                 <button class="btn" id="confirm-switch-master">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно заявки на становление мастером -->
+    <div id="master-request-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" id="master-request-modal-close">&times;</button>
+            <h2 class="modal-title">Заявка на становление мастером</h2>
+            <div class="form-group">
+                <label class="form-label" for="request-salon">Выберите салон</label>
+                <select class="form-input" id="request-salon"></select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="request-specialization">Специализация</label>
+                <select class="form-input" id="request-specialization">
+                    <option value="">Выберите специализацию</option>
+                    <option value="Парикмахер">Парикмахер</option>
+                    <option value="Мастер маникюра">Мастер маникюра</option>
+                    <option value="Косметолог">Косметолог</option>
+                    <option value="Массажист">Массажист</option>
+                    <option value="Барбер">Барбер</option>
+                    <option value="Визажист">Визажист</option>
+                    <option value="Бровист">Бровист</option>
+                    <option value="Лешмейкер">Лешмейкер</option>
+                    <option value="Эстетист">Эстетист</option>
+                    <option value="Подолог">Подолог</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancel-master-request">Отмена</button>
+                <button class="btn" id="submit-master-request">Отправить заявку</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно добавления услуги мастеру -->
+    <div id="add-master-service-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" id="add-master-service-modal-close">&times;</button>
+            <h2 class="modal-title">Добавить услугу</h2>
+            <div class="form-group">
+                <label class="form-label" for="master-service-select">Выберите услугу</label>
+                <select class="form-input" id="master-service-select"></select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancel-add-master-service">Отмена</button>
+                <button class="btn" id="confirm-add-master-service">Добавить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно действий над записью (для мобильных) -->
+    <div id="booking-action-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" id="booking-action-modal-close">&times;</button>
+            <h2 class="modal-title">Действия с записью</h2>
+            <div id="booking-action-details"></div>
+            <div class="modal-actions" style="justify-content: space-around;">
+                <button class="btn btn-success" id="booking-action-complete"><i class="fas fa-check"></i> Выполнено</button>
+                <button class="btn btn-danger" id="booking-action-cancel"><i class="fas fa-times"></i> Отменить</button>
             </div>
         </div>
     </div>
