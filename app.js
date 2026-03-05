@@ -1530,7 +1530,7 @@ async function updateAdminTables() {
             row.innerHTML = `
                 <td>${salon.name}</td>
                 <td>${salon.address || 'Не указан'}</td>
-                <td>${renderStars(salon.rating || 0)} ${(salon.rating || 0).toFixed(1)}</td>
+                <td>${renderStars(parseFloat(salon.rating) || 0)} ${(parseFloat(salon.rating) || 0).toFixed(1)}</td>
                 <td>
                     <button class="action-btn edit" onclick="editSalon('${salon.id}')">Изменить</button>
                     <button class="action-btn delete" onclick="deleteSalon('${salon.id}')">Удалить</button>
