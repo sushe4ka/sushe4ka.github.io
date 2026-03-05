@@ -13,6 +13,8 @@ const firebaseConfig = {
 
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
+} else {
+    firebase.app();
 }
 
 const db = firebase.firestore();
@@ -328,25 +330,32 @@ function clearModalFields(modalId) {
 // ==============================================
 async function uploadImage(file, folder) {
     if (!file) return null;
-
+    
+    // Проверка размера (5MB)
     const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
-        showNotification('Файл слишком большой. Максимальный размер 5 МБ.', 'error');
+        showNotification('Файл слишком большой. Максимум 5MB', 'error');
         return null;
     }
-
-    const storageRef = storage.ref();
-    const safeFileName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-    const fileName = `${Date.now()}_${safeFileName}`;
-    const fileRef = storageRef.child(`${folder}/${fileName}`);
-
+    
+    // Проверка типа файла
+    if (!file.type.startsWith('image/')) {
+        showNotification('Загрузите изображение', 'error');
+        return null;
+    }
+    
     try {
+        const storageRef = storage.ref();
+        const safeFileName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+        const fileName = `${Date.now()}_${safeFileName}`;
+        const fileRef = storageRef.child(`${folder}/${fileName}`);
+        
         await fileRef.put(file);
         const downloadUrl = await fileRef.getDownloadURL();
         return downloadUrl;
     } catch (error) {
         console.error('Ошибка загрузки изображения:', error);
-        showNotification('Ошибка загрузки изображения. Проверьте соединение.', 'error');
+        showNotification('Ошибка загрузки изображения', 'error');
         return null;
     }
 }
@@ -355,13 +364,12 @@ async function uploadImage(file, folder) {
 // ОПТИМИЗИРОВАННЫЕ ФУНКЦИИ ПОЛУЧЕНИЯ ДАННЫХ
 // ==============================================
 async function getCachedData(collection, force = false) {
-    const now = Date.now();
-    
-    if (!force && cache[collection] && (now - cache.lastFetch) < CACHE_TTL) {
-        return cache[collection];
-    }
-    
     try {
+        const now = Date.now();
+        if (!force && cache[collection] && (now - cache.lastFetch) < CACHE_TTL) {
+            return cache[collection];
+        }
+        
         const snapshot = await db.collection(collection).get();
         const data = [];
         snapshot.forEach(doc => {
@@ -373,6 +381,7 @@ async function getCachedData(collection, force = false) {
         return data;
     } catch (error) {
         console.error(`Ошибка загрузки ${collection}:`, error);
+        showNotification(`Ошибка загрузки данных: ${collection}`, 'error');
         return cache[collection] || [];
     }
 }
@@ -661,58 +670,50 @@ async function register() {
     const password = document.getElementById('register-password').value.trim();
     const passwordConfirm = document.getElementById('register-password-confirm').value.trim();
     const name = document.getElementById('register-name').value.trim();
-    const lastname = document.getElementById('register-lastname').value.trim();
-    const phone = document.getElementById('register-phone').value.trim();
-
-    if (!email || !password || !passwordConfirm || !name) {
-        showNotification('Пожалуйста, заполните обязательные поля', 'error');
+    
+    // Валидация
+    if (!email || !password || !name) {
+        showNotification('Заполните обязательные поля', 'error');
         return;
     }
-
+    
     if (password.length < 6) {
-        showNotification('Пароль должен содержать минимум 6 символов', 'error');
+        showNotification('Пароль минимум 6 символов', 'error');
         return;
     }
-
+    
     if (password !== passwordConfirm) {
         showNotification('Пароли не совпадают', 'error');
         return;
     }
-
+    
     try {
         const userCredential = await auth.createUserWithEmailAndPassword(email, password);
         const user = userCredential.user;
-
+        
         const userData = {
             email: email,
             name: name,
-            lastname: lastname || '',
-            phone: phone || '',
+            lastname: document.getElementById('register-lastname').value.trim(),
+            phone: document.getElementById('register-phone').value.trim(),
             role: 'client',
             registrationDate: firebase.firestore.FieldValue.serverTimestamp(),
             bookings: []
         };
-
+        
         await db.collection('users').doc(user.uid).set(userData);
-
-        currentUser = { id: user.uid, ...userData };
-        localStorage.setItem('beautyBookingUser', JSON.stringify(currentUser));
-
-        await logAction('create', 'user', user.uid, {}, `${name} ${lastname}`);
-
-        updateProfileButton();
+        
+        // Логирование действия
+        await logAction('create', 'user', user.uid, {}, userData.name);
+        
+        showNotification('Регистрация успешна!');
         hideModal('profile-modal');
-        document.getElementById('register-email').value = '';
-        document.getElementById('register-password').value = '';
-        document.getElementById('register-password-confirm').value = '';
-        document.getElementById('register-name').value = '';
-        document.getElementById('register-lastname').value = '';
-        document.getElementById('register-phone').value = '';
-        showNotification('Регистрация прошла успешно!');
     } catch (error) {
         console.error('Ошибка регистрации:', error);
         if (error.code === 'auth/email-already-in-use') {
-            showNotification('Пользователь с таким email уже зарегистрирован', 'error');
+            showNotification('Email уже зарегистрирован', 'error');
+        } else if (error.code === 'auth/weak-password') {
+            showNotification('Слабый пароль', 'error');
         } else {
             showNotification('Ошибка регистрации', 'error');
         }
@@ -2838,28 +2839,38 @@ function createBookingCard(booking) {
 }
 
 async function loadDayBookings(date) {
-    if (!currentUser) return;
+    if (!currentUser || currentUser.role !== 'master') return;
     
     const masters = await getMasters({ userId: currentUser.id });
     if (masters.length === 0) return;
     
     const master = masters[0];
-    const bookings = await getBookings({ masterId: master.id, date: date, status: 'Подтверждена' });
+    const dayOfWeek = new Date(date).getDay(); // 0 - Вс, 6 - Сб
     
-    const container = document.getElementById('day-bookings');
-    const dateText = document.getElementById('selected-date-text');
-    if (!container || !dateText) return;
-    
-    dateText.textContent = formatDate(date);
-    
-    if (bookings.length === 0) {
-        container.innerHTML = '<div class="no-results">На эту дату нет записей</div>';
+    // Проверка выходного
+    if (master.daysOff && master.daysOff.includes(dayOfWeek)) {
+        document.getElementById('day-bookings').innerHTML = 
+            '<div class="no-results">Выходной день</div>';
         return;
     }
     
-    bookings.sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
-    container.innerHTML = '';
-    bookings.forEach(booking => container.appendChild(createBookingCard(booking)));
+    const bookings = await getBookings({ 
+        masterId: master.id, 
+        date: date,
+        status: 'Подтверждена'
+    });
+    
+    // Отображение записей
+    const container = document.getElementById('day-bookings');
+    if (bookings.length === 0) {
+        container.innerHTML = '<div class="no-results">Нет записей</div>';
+    } else {
+        bookings.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+        container.innerHTML = '';
+        bookings.forEach(booking => {
+            container.appendChild(createBookingCard(booking));
+        });
+    }
 }
 
 function prevMonth() {
@@ -3062,23 +3073,22 @@ function updateBookingSummary() {
 }
 
 async function confirmBooking() {
-    const nameInput = document.getElementById('client-name');
-    const lastnameInput = document.getElementById('client-lastname');
-    const phoneInput = document.getElementById('client-phone');
-    const commentInput = document.getElementById('client-comment');
-    
-    let name = nameInput.value.trim() || currentUser?.name || '';
-    let lastname = lastnameInput.value.trim() || currentUser?.lastname || '';
-    let phone = phoneInput.value.trim() || currentUser?.phone || '';
-    const comment = commentInput.value.trim();
-    
-    if (!name || !lastname || !phone) {
-        showNotification('Заполните обязательные поля', 'error');
+    // Проверка заполнения полей
+    if (!selectedService || !selectedMaster || !selectedDate || !selectedTime) {
+        showNotification('Заполните все данные', 'error');
         return;
     }
     
-    if (!selectedService || !selectedMaster || !selectedDate || !selectedTime) {
-        showNotification('Заполните все данные бронирования', 'error');
+    // Проверка на существующие записи
+    const existingBookings = await db.collection('bookings')
+        .where('masterId', '==', selectedMaster.id)
+        .where('date', '==', selectedDate)
+        .where('time', '==', selectedTime)
+        .where('status', '!=', 'Отменено')
+        .get();
+    
+    if (!existingBookings.empty) {
+        showNotification('Это время уже занято', 'error');
         return;
     }
     
@@ -3093,10 +3103,10 @@ async function confirmBooking() {
             masterName: selectedMaster.name,
             date: selectedDate,
             time: selectedTime,
-            clientName: name,
-            clientLastname: lastname,
-            clientPhone: phone,
-            clientComment: comment,
+            clientName: document.getElementById('client-name').value,
+            clientLastname: document.getElementById('client-lastname').value,
+            clientPhone: document.getElementById('client-phone').value,
+            clientComment: document.getElementById('client-comment').value,
             totalPrice: selectedService.price || 0,
             duration: selectedService.duration || 60,
             bookingDate: firebase.firestore.FieldValue.serverTimestamp(),
@@ -3104,11 +3114,9 @@ async function confirmBooking() {
         };
         
         await db.collection('bookings').add(bookingData);
-        await logAction('booking', 'booking', 'new', bookingData, `Запись в ${currentSalon.name}`);
-        
         showNotification('Запись успешно создана!');
-        clearCache();
         
+        // Очистка и переход
         setTimeout(() => {
             showPage(currentUser ? 'profile-page' : 'home-page');
         }, 2000);
@@ -3281,40 +3289,42 @@ async function updateMasterRating(masterId) {
 // ==============================================
 async function submitReview() {
     if (!currentUser) {
-        showNotification('Авторизуйтесь, чтобы оставить отзыв', 'error');
+        showNotification('Авторизуйтесь', 'error');
         showModal('profile-modal');
         return;
     }
     
     if (!currentSalon) {
-        showNotification('Выберите салон для отзыва', 'error');
+        showNotification('Салон не выбран', 'error');
         return;
     }
     
-    const reviewText = document.getElementById('review-text')?.value.trim() || '';
+    const rating = selectedRating;
+    const text = document.getElementById('review-text').value.trim();
     
-    if (selectedRating === 0) {
+    if (rating === 0) {
         showNotification('Оцените салон', 'error');
         return;
     }
     
     try {
+        // Проверка на существующий отзыв
         const existing = await db.collection('reviews')
             .where('salonId', '==', currentSalon.id)
             .where('authorId', '==', currentUser.id)
             .get();
-            
+        
         if (!existing.empty) {
-            showNotification('Вы уже оставляли отзыв для этого салона', 'warning');
+            showNotification('Вы уже оставляли отзыв', 'warning');
             return;
         }
         
         const reviewData = {
             authorId: currentUser.id,
             authorName: currentUser.name || currentUser.email.split('@')[0],
-            authorImage: getSafeImageUrl('avatar', currentUser.name),
-            text: reviewText,
-            rating: selectedRating,
+            authorImage: currentUser.photoURL || getSafeImageUrl('avatar', currentUser.name),
+            text: text,
+            rating: rating,
             salonId: currentSalon.id,
             salonName: currentSalon.name,
             date: firebase.firestore.FieldValue.serverTimestamp()
@@ -3323,16 +3333,13 @@ async function submitReview() {
         await db.collection('reviews').add(reviewData);
         await updateSalonRating(currentSalon.id);
         
+        showNotification('Отзыв опубликован');
         document.getElementById('review-text').value = '';
         selectedRating = 0;
         updateRatingDisplay();
-        
-        showNotification('Отзыв опубликован');
-        await loadSalonReviews();
-        clearCache();
     } catch (error) {
         console.error('Ошибка отправки отзыва:', error);
-        showNotification('Ошибка при публикации', 'error');
+        showNotification('Ошибка', 'error');
     }
 }
 
@@ -4259,33 +4266,52 @@ function updateServicesContainerHeight() {
 async function ensureAdminExists() {
     try {
         const adminEmail = 'admin@beauty.ru';
-        const adminPassword = 'admin1';
+        const adminPassword = 'admin123'; // Минимум 6 символов!
         
-        const users = await getUsers();
-        const adminExists = users.some(user => user.email === adminEmail && user.role === 'admin');
+        // Проверяем, существует ли уже админ
+        const usersSnapshot = await db.collection('users')
+            .where('email', '==', adminEmail)
+            .limit(1)
+            .get();
         
-        if (!adminExists) {
-            try {
-                const userCredential = await auth.createUserWithEmailAndPassword(adminEmail, adminPassword);
-                const user = userCredential.user;
-                
-                await db.collection('users').doc(user.uid).set({
-                    email: adminEmail,
-                    name: 'Администратор',
-                    lastname: 'Системы',
-                    phone: '+7 (999) 123-45-67',
-                    role: 'admin',
-                    isAdmin: true,
-                    registrationDate: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                
-                console.log('Администратор создан');
-            } catch (error) {
-                console.error('Ошибка создания админа:', error);
-            }
+        if (usersSnapshot.empty) {
+            console.log('Создание администратора...');
+            
+            // Создаём пользователя в Authentication
+            const userCredential = await auth.createUserWithEmailAndPassword(
+                adminEmail, 
+                adminPassword
+            );
+            
+            const user = userCredential.user;
+            
+            // Создаём документ в Firestore
+            await db.collection('users').doc(user.uid).set({
+                email: adminEmail,
+                name: 'Администратор',
+                lastname: 'Системы',
+                phone: '+7 (999) 123-45-67',
+                role: 'admin',
+                isAdmin: true,
+                registrationDate: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            console.log('✅ Администратор создан:', user.uid);
+            showNotification('Администратор создан. Email: admin@beauty.ru, Пароль: admin123', 'success');
+        } else {
+            console.log('✅ Администратор уже существует');
         }
     } catch (error) {
-        console.error('Ошибка проверки админа:', error);
+        console.error('❌ Ошибка создания админа:', error);
+        
+        if (error.code === 'auth/email-already-in-use') {
+            console.log('Email уже зарегистрирован');
+        } else if (error.code === 'auth/weak-password') {
+            console.log('Слабый пароль. Минимум 6 символов!');
+            showNotification('Пароль должен быть минимум 6 символов', 'error');
+        } else {
+            showNotification('Ошибка создания админа: ' + error.message, 'error');
+        }
     }
 }
 
