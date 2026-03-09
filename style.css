@@ -2418,3 +2418,253 @@ input:-webkit-autofill:active {
 #admin-services-grid .btn-action {
     width: 100%;
 }
+
+/* ============================================== */
+/* МОБИЛЬНАЯ АДАПТАЦИЯ (до 768px) */
+/* ============================================== */
+
+@media (max-width: 768px) {
+    /* ШАПКА */
+    .header-container {
+        flex-wrap: wrap;
+        padding: 10px;
+    }
+    .logo {
+        font-size: 18px;
+        margin-bottom: 8px;
+    }
+    nav {
+        order: 3;
+        width: 100%;
+        margin-top: 10px;
+    }
+    #main-nav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 5px;
+    }
+    #main-nav li {
+        margin: 0;
+    }
+    #main-nav a {
+        padding: 8px 12px;
+        font-size: 14px;
+    }
+    .auth-buttons {
+        margin-left: auto;
+    }
+
+    /* ГЛАВНАЯ СТРАНИЦА */
+    .hero-title {
+        font-size: 28px;
+    }
+    .hero-subtitle {
+        font-size: 16px;
+    }
+    .search-input-wrapper {
+        flex-wrap: wrap;
+    }
+    .search-input-wrapper input {
+        width: 100%;
+        margin-bottom: 10px;
+    }
+    .btn-search {
+        width: 100%;
+        justify-content: center;
+    }
+
+    /* СЕТКИ КАРТОЧЕК */
+    .salons-grid,
+    .services-grid,
+    .masters-grid,
+    .reviews-list {
+        grid-template-columns: 1fr !important;
+        gap: 15px;
+    }
+
+    /* КАРТОЧКИ */
+    .salon-card,
+    .service-card,
+    .master-card {
+        flex-direction: column;
+    }
+    .salon-img,
+    .service-card img,
+    .master-card img {
+        width: 100%;
+        height: 180px;
+        object-fit: cover;
+    }
+    .salon-info,
+    .service-info,
+    .master-info {
+        padding: 15px;
+    }
+
+    /* ФИЛЬТРЫ (если они есть) */
+    .advanced-filters {
+        flex-direction: column;
+        gap: 10px;
+    }
+    .filter-group {
+        width: 100%;
+    }
+
+    /* СТРАНИЦА САЛОНА */
+    .salon-header {
+        flex-direction: column;
+    }
+    .salon-main-img {
+        width: 100%;
+        margin-right: 0;
+        margin-bottom: 20px;
+    }
+    .salon-details {
+        width: 100%;
+    }
+    .salon-tags {
+        flex-wrap: wrap;
+    }
+
+    /* АДМИН-ПАНЕЛЬ */
+    .admin-mode-switcher {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .mode-btn {
+        flex: 1 1 calc(50% - 8px);
+        font-size: 13px;
+        padding: 10px 5px;
+    }
+    .stats-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    .data-table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .data-table {
+        min-width: 600px; /* принудительная ширина для горизонтального скролла */
+    }
+    .data-table th,
+    .data-table td {
+        white-space: nowrap;
+        padding: 8px;
+    }
+
+    /* ПАНЕЛЬ МАСТЕРА */
+    .master-info-card {
+        padding: 15px;
+    }
+    .master-details {
+        grid-template-columns: 1fr;
+    }
+    .master-switcher > div {
+        flex-wrap: wrap;
+    }
+    .master-switcher select {
+        width: 100%;
+    }
+
+    /* КАЛЕНДАРЬ */
+    .calendar-grid {
+        grid-template-columns: repeat(7, 1fr);
+        gap: 3px;
+    }
+    .calendar-date {
+        padding: 8px 0;
+        font-size: 14px;
+    }
+
+    /* МОДАЛЬНЫЕ ОКНА */
+    .modal-content {
+        width: 95%;
+        margin: 20px auto;
+        max-height: 85vh;
+        overflow-y: auto;
+    }
+    .modal-content .checkbox-group {
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    /* ФОРМЫ */
+    .form-group {
+        margin-bottom: 15px;
+    }
+    .form-input,
+    .form-textarea,
+    .btn {
+        font-size: 16px; /* чтобы не зумилось на iOS */
+        padding: 12px 15px;
+    }
+    .checkbox-group {
+        flex-wrap: wrap;
+    }
+    .checkbox-item {
+        width: 100%;
+    }
+
+    /* ОТЗЫВЫ */
+    .review-item {
+        padding: 15px;
+    }
+    .review-header {
+        flex-wrap: wrap;
+    }
+
+    /* ФУТЕР */
+    .footer-content {
+        grid-template-columns: 1fr;
+        gap: 20px;
+        text-align: center;
+    }
+}
+
+/* Дополнительная адаптация для очень маленьких экранов (до 480px) */
+@media (max-width: 480px) {
+    .hero-title {
+        font-size: 24px;
+    }
+    .mode-btn {
+        flex: 1 1 100%;
+    }
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    .booking-progress {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .progress-step {
+        width: 45%;
+        margin-bottom: 10px;
+    }
+}
+
+/* Улучшение touch-областей для кнопок */
+button,
+.btn,
+.action-btn,
+.nav-link,
+.modal-close,
+.calendar-date {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+}
+
+/* Запрет масштабирования полей ввода (уже есть в некоторых браузерах) */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="tel"],
+input[type="number"],
+select,
+textarea {
+    font-size: 16px;
+}
