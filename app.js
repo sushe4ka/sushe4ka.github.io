@@ -79,7 +79,6 @@ function getCategoryFromSpecialization(specialization) {
 }
 
 function getSafeImageUrl(type = 'salon', text = '') {
-    // SVG placeholder вместо внешнего сервиса
     const safeText = encodeURIComponent(text || type);
     return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='200'%3E%3Crect fill='%23f0f0f0' width='300' height='200'/%3E%3Ctext fill='%23999999' font-family='Arial' font-size='24' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3E${safeText}%3C/text%3E%3C/svg%3E`;
 }
@@ -185,22 +184,6 @@ function showNotification(message, type = 'success') {
 // ==============================================
 function parseHash() {
     const hash = window.location.hash.substring(1);
-    if (!hash) return { page: 'home' };
-    
-    if (hash.startsWith('service/')) {
-        const serviceName = decodeURIComponent(hash.substring(8));
-        return { page: 'service', serviceName };
-    }
-    
-    const parts = hash.split('?');
-    const page = parts[0];
-    const params = new URLSearchParams(parts[1] || '');
-    return { page, params };
-}
-
-// Исправленная функция parseHash
-function parseHash() {
-    const hash = window.location.hash.substring(1);
     if (!hash) return { page: 'home', params: new URLSearchParams() };
     
     if (hash.startsWith('service/')) {
@@ -210,12 +193,11 @@ function parseHash() {
     
     const parts = hash.split('?');
     const page = parts[0];
-    const params = new URLSearchParams(parts[1] || ''); // Гарантируем создание объекта
+    const params = new URLSearchParams(parts[1] || '');
     
     return { page, params };
 }
 
-//  функция showPageFromHash
 function showPageFromHash() {
     const { page, params, serviceName } = parseHash();
     
@@ -231,7 +213,6 @@ function showPageFromHash() {
     
     const pageId = page + '-page';
     if (document.getElementById(pageId)) {
-        // ДОБАВЛЕНА ПРОВЕРКА на существование params
         if (params && params.has('id')) {
             const id = params.get('id');
             if (page === 'master') {
@@ -247,6 +228,7 @@ function showPageFromHash() {
         showPage('home-page');
     }
 }
+
 // ==============================================
 // ФУНКЦИЯ showPage
 // ==============================================
@@ -333,14 +315,12 @@ function clearModalFields(modalId) {
 async function uploadImage(file, folder) {
     if (!file) return null;
     
-    // Проверка размера (5MB)
     const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
         showNotification('Файл слишком большой. Максимум 5MB', 'error');
         return null;
     }
     
-    // Проверка типа файла
     if (!file.type.startsWith('image/')) {
         showNotification('Загрузите изображение', 'error');
         return null;
@@ -673,7 +653,6 @@ async function register() {
     const passwordConfirm = document.getElementById('register-password-confirm').value.trim();
     const name = document.getElementById('register-name').value.trim();
     
-    // Валидация
     if (!email || !password || !name) {
         showNotification('Заполните обязательные поля', 'error');
         return;
@@ -705,7 +684,6 @@ async function register() {
         
         await db.collection('users').doc(user.uid).set(userData);
         
-        // Логирование действия
         await logAction('create', 'user', user.uid, {}, userData.name);
         
         showNotification('Регистрация успешна!');
@@ -978,7 +956,7 @@ async function applyFilters() {
 }
 
 // ==============================================
-// СОЗДАНИЕ КАРТОЧЕК
+// СОЗДАНИЕ КАРТОЧЕК (ИСПРАВЛЕННЫЕ ВЕРСИИ)
 // ==============================================
 function createSalonCard(salon) {
     const card = document.createElement('div');
@@ -988,8 +966,8 @@ function createSalonCard(salon) {
     const imageUrl = salon.imageUrl || getSafeImageUrl('salon', salon.name);
     const rating = salon.rating || 0;
     
- card.innerHTML = `
-<img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(salon.name)}%3C/text%3E%3C/svg%3E'">
+    card.innerHTML = `
+        <img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(salon.name)}%3C/text%3E%3C/svg%3E'">
         <div class="salon-info">
             <h3 class="salon-name">${salon.name}</h3>
             <p class="salon-address"><i class="fas fa-map-marker-alt"></i> ${salon.address || 'Адрес не указан'}</p>
@@ -1034,8 +1012,8 @@ function createServiceCard(service, compact = false) {
     const imageUrl = service.imageUrl || getSafeImageUrl('service', service.name);
     
     if (compact) {
-     card.innerHTML = `
-<img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(salon.name)}%3C/text%3E%3C/svg%3E'">
+        card.innerHTML = `
+            <img src="${imageUrl}" alt="${service.name}" class="service-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(service.name)}%3C/text%3E%3C/svg%3E'">
             <div class="service-info">
                 <h3 class="service-name">${service.name}</h3>
                 <p class="service-category">${getCategoryName(service.category)}</p>
@@ -1044,7 +1022,7 @@ function createServiceCard(service, compact = false) {
         `;
     } else {
         card.innerHTML = `
-<img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(salon.name)}%3C/text%3E%3C/svg%3E'">
+            <img src="${imageUrl}" alt="${service.name}" class="service-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(service.name)}%3C/text%3E%3C/svg%3E'">
             <div class="service-info">
                 <h3 class="service-name">${service.name}</h3>
                 <p class="service-category">${getCategoryName(service.category)}</p>
@@ -1065,8 +1043,8 @@ function createMasterCard(master) {
     
     const imageUrl = master.imageUrl || getSafeImageUrl('master', master.name);
     
-  card.innerHTML = `
-<img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(salon.name)}%3C/text%3E%3C/svg%3E'">
+    card.innerHTML = `
+        <img src="${imageUrl}" alt="${master.name}" class="master-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(master.name)}%3C/text%3E%3C/svg%3E'">
         <div class="master-info">
             <h3 class="master-name">${master.name}</h3>
             <p class="master-specialization">${master.specialization || 'Не указано'}</p>
@@ -1104,7 +1082,7 @@ function createMasterCard(master) {
 }
 
 // ==============================================
-// СТРАНИЦА САЛОНА (ИСПРАВЛЕНО)
+// СТРАНИЦА САЛОНА
 // ==============================================
 async function loadSalonPage(salonId) {
     showPage('salon-page');
@@ -1232,7 +1210,7 @@ async function loadSalonPage(salonId) {
 }
 
 // ==============================================
-// СТРАНИЦА МАСТЕРА (ИСПРАВЛЕНО)
+// СТРАНИЦА МАСТЕРА
 // ==============================================
 async function loadMasterPage(masterId) {
     showPage('master-page');
@@ -1682,8 +1660,8 @@ async function loadAdminServicesGrid() {
             const salonsCount = details?.salons?.length || 0;
             const mastersCount = details?.masters?.length || 0;
             
-           card.innerHTML = `
-<img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(salon.name)}%3C/text%3E%3C/svg%3E'">
+            card.innerHTML = `
+                <img src="${imageUrl}" alt="${service.name}" class="service-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(service.name)}%3C/text%3E%3C/svg%3E'">
                 <div class="service-info">
                     <h3 class="service-name" style="font-size: 16px;">${service.name}</h3>
                     <p class="service-category" style="font-size: 13px;">${getCategoryName(service.category)}</p>
@@ -2585,8 +2563,8 @@ async function loadMasterServicesList(masterId) {
         uniqueServices.forEach(service => {
             const card = document.createElement('div');
             card.className = 'service-card';
-           card.innerHTML = `
-<img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(salon.name)}%3C/text%3E%3C/svg%3E'">
+            card.innerHTML = `
+                <img src="${service.imageUrl || getSafeImageUrl('service', service.name)}" alt="${service.name}" class="service-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(service.name)}%3C/text%3E%3C/svg%3E'">
                 <div class="service-info">
                     <h3 class="service-name">${service.name}</h3>
                     <p class="service-category">${getCategoryName(service.category)}</p>
@@ -2958,8 +2936,8 @@ async function startBookingProcess() {
         const card = document.createElement('div');
         card.className = 'service-card';
         card.dataset.serviceId = service.id;
-card.innerHTML = `
-<img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(salon.name)}%3C/text%3E%3C/svg%3E'">
+        card.innerHTML = `
+            <img src="${service.imageUrl || getSafeImageUrl('service', service.name)}" alt="${service.name}" class="service-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(service.name)}%3C/text%3E%3C/svg%3E'">
             <div class="service-info">
                 <h3 class="service-name">${service.name}</h3>
                 <p class="service-price">${service.price || 0} ₽</p>
@@ -2994,8 +2972,8 @@ async function loadMastersForBooking() {
         const card = document.createElement('div');
         card.className = 'master-card';
         card.dataset.masterId = master.id;
-card.innerHTML = `
-<img src="${imageUrl}" alt="${salon.name}" class="salon-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(salon.name)}%3C/text%3E%3C/svg%3E'">
+        card.innerHTML = `
+            <img src="${master.imageUrl || getSafeImageUrl('master', master.name)}" alt="${master.name}" class="master-img" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27300%27 height=%27200%27%3E%3Crect fill=%27%23f0f0f0%27 width=%27300%27 height=%27200%27/%3E%3Ctext fill=%27%23999999%27 font-family=%27Arial%27 font-size=%2720%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3E${encodeURIComponent(master.name)}%3C/text%3E%3C/svg%3E'">
             <div class="master-info">
                 <h3 class="master-name">${master.name}</h3>
                 <p class="master-specialization">${master.specialization || 'Не указано'}</p>
@@ -4268,7 +4246,7 @@ function updateServicesContainerHeight() {
 async function ensureAdminExists() {
     try {
         const adminEmail = 'admin@beauty.ru';
-        const adminPassword = 'admin123'; // Минимум 6 символов!
+        const adminPassword = 'admin123';
         
         // Проверяем, существует ли уже админ
         const usersSnapshot = await db.collection('users')
